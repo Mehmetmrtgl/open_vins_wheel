@@ -161,6 +161,11 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
                                                         propagator, params.gravity_mag, params.zupt_max_velocity,
                                                         params.zupt_noise_multiplier, params.zupt_max_disparity);
   }
+
+  if (params.wheel_options.enabled) {
+    updaterWheel = std::make_shared<UpdaterWheel>(state);
+    PRINT_INFO("UpdaterWheel initialized!\n");
+  }
 }
 
 void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {

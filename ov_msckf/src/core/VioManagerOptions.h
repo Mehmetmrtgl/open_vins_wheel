@@ -32,7 +32,7 @@
 #include "state/StateOptions.h"
 #include "update/UpdaterOptions.h"
 #include "utils/NoiseManager.h"
-
+#include "update/OptionsWheel.h"
 #include "init/InertialInitializerOptions.h"
 
 #include "cam/CamEqui.h"
@@ -97,6 +97,8 @@ struct VioManagerOptions {
   /// If we should record the timing performance to file
   bool record_timing_information = false;
 
+  OptionsWheel wheel_options;
+
   /// The path to the file we will record the timing information into
   std::string record_timing_filepath = "ov_msckf_timing.txt";
 
@@ -119,6 +121,19 @@ struct VioManagerOptions {
       parser->parse_config("zupt_only_at_beginning", zupt_only_at_beginning);
       parser->parse_config("record_timing_information", record_timing_information);
       parser->parse_config("record_timing_filepath", record_timing_filepath);
+
+      parser->parse_external("relative_config_wheel", "wheel0", "enabled", wheel_options.enabled, false);
+
+      if(wheel_options.enabled) {
+          parser->parse_external("relative_config_wheel", "wheel", "topic", wheel_options.topic);
+          parser->parse_external("relative_config_wheel", "wheel", "noise_v", wheel_options.noise_v);
+          parser->parse_external("relative_config_wheel", "wheel", "noise_w", wheel_options.noise_w);
+          parser->parse_external("relative_config_wheel", "wheel", "do_calib_ext", wheel_options.do_calib_ext);
+          parser->parse_external("relative_config_wheel", "wheel", "chi2_mult", wheel_options.chi2_mult);
+          
+          // Matris okuma (Eigen overload'ı 4 parametre ile çalışır)
+          parser->parse_external("relative_config_wheel", "wheel0", "T_imu_wheel", wheel_options.T_imu_wheel);
+      }
     }
     PRINT_DEBUG("  - dt_slam_delay: %.1f\n", dt_slam_delay);
     PRINT_DEBUG("  - zero_velocity_update: %d\n", try_zupt);
