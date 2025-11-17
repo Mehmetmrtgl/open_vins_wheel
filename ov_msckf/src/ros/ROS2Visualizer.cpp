@@ -605,8 +605,25 @@ void ROS2Visualizer::callback_stereo(const sensor_msgs::msg::Image::ConstSharedP
 }
 
 void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::SharedPtr msg) {
+  ov_core::OdometryData data;
+  data.timestamp = rclcpp::Time(msg->header.stamp).seconds();
+
+  data.linear_velocity << msg->twist.twist.linear.x,
+                          msg->twist.twist.linear.y,
+                          msg->twist.twist.linear.z;
+
+  data.angular_velocity << msg->twist.twist.angular.x,
+                           msg->twist.twist.angular.y,
+                           msg->twist.twist.angular.z;
 
 
+  for (int i = 0; i < 6; i++) {
+    for (int j = 0; j < 6; j++) {
+      data.covariance(i, j) = msg->twist.covariance[i * 6 + j];
+    }
+  }
+
+  // _app->feed_measurement_wheel(data);
 }
 
 void ROS2Visualizer::publish_state() {
