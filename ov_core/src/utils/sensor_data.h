@@ -78,6 +78,23 @@ struct CameraData {
   }
 };
 
+
+//================================================//
+//======           Odometry Data          ========//
+//================================================//
+struct OdometryData {
+  
+  double timestamp;
+
+  Eigen::Matrix<double, 3, 1> linear_velocity;
+
+  Eigen::Matrix<double, 3, 1> angular_velocity;
+
+  Eigen::Matrix<double, 6, 6> covariance;
+
+  bool operator<(const OdometryData &other) const { return timestamp < other.timestamp; }
+};
+
 } // namespace ov_core
 
 #endif // OV_CORE_SENSOR_DATA_H
