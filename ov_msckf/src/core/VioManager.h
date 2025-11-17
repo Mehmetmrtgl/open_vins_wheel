@@ -32,6 +32,7 @@
 #include <string>
 
 #include "VioManagerOptions.h"
+#include "update/UpdaterWheel.h"
 
 namespace ov_core {
 struct ImuData;
@@ -94,6 +95,13 @@ public:
    * @param imustate State in the MSCKF ordering: [time(sec),q_GtoI,p_IinG,v_IinG,b_gyro,b_accel]
    */
   void initialize_with_gt(Eigen::Matrix<double, 17, 1> imustate);
+
+
+  //======================================================//
+  //=====          feed_measurement_wheel            =====//
+  //======================================================//
+
+  void feed_measurement_wheel(const ov_core::OdometryData& message);
 
   /// If we are initialized or not
   bool initialized() { return is_initialized_vio && timelastupdate != -1; }
@@ -205,6 +213,9 @@ protected:
 
   /// Our zero velocity tracker
   std::shared_ptr<UpdaterZeroVelocity> updaterZUPT;
+
+  /// wheel updater
+  std::shared_ptr<UpdaterWheel> updaterWheel;
 
   /// This is the queue of measurement times that have come in since we starting doing initialization
   /// After we initialize, we will want to prop & update to the latest timestamp quickly
