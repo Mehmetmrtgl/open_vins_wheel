@@ -174,6 +174,22 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
                                                               std::bind(&ROS2Visualizer::callback_inertial, this, std::placeholders::_1));
   PRINT_INFO("subscribing to IMU: %s\n", topic_imu.c_str());
 
+  //==============================================================//
+  //=====             Subscription_wheel                    ======//
+  //==============================================================//
+  
+  std::string topic_wheel;
+  _node->declare_parameter<std::string>("topic_wheel", "/wheel_odom");
+  _node->get_parameter("topic_wheel", topic_wheel);
+  parser->parse_external("relative_config_wheel", "wheel0", "rostopic", topic_wheel);
+  sub_wheel = _node->create_subscription<nav_msgs::msg::Odometry>(
+      topic_wheel, 
+      rclcpp::SensorDataQoS(),
+      std::bind(&ROS2Visualizer::callback_wheel, this, std::placeholders::_1)
+  );
+  
+  PRINT_INFO("subscribing to wheel odom: %s\n", topic_wheel.c_str());
+
   // Logic for sync stereo subscriber
   // https://answers.ros.org/question/96346/subscribe-to-two-image_raws-with-one-function/?answer=96491#post-id-96491
   if (_app->get_params().state_options.num_cameras == 2) {
@@ -586,6 +602,11 @@ void ROS2Visualizer::callback_stereo(const sensor_msgs::msg::Image::ConstSharedP
   std::lock_guard<std::mutex> lck(camera_queue_mtx);
   camera_queue.push_back(message);
   std::sort(camera_queue.begin(), camera_queue.end());
+}
+
+void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::SharedPtr msg) {
+
+
 }
 
 void ROS2Visualizer::publish_state() {
