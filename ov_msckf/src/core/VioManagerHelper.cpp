@@ -75,6 +75,8 @@ void VioManager::initialize_with_gt(Eigen::Matrix<double, 17, 1> imustate) {
   PRINT_DEBUG(GREEN "[INIT]: position = %.4f, %.4f, %.4f\n" RESET, state->_imu->pos()(0), state->_imu->pos()(1), state->_imu->pos()(2));
 }
 
+void ov_msckf::VioManager::feed_measurement_wheel(const ov_core::OdometryData &message) {}
+
 bool VioManager::try_to_initialize(const ov_core::CameraData &message) {
 
   // Directly return if the initialization thread is running

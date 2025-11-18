@@ -623,7 +623,7 @@ void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::Sha
     }
   }
 
-  // _app->feed_measurement_wheel(data);
+  _app->feed_measurement_wheel(data);
 }
 
 void ROS2Visualizer::publish_state() {
