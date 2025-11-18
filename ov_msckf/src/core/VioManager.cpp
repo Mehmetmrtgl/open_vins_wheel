@@ -193,6 +193,19 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
   }
 }
 
+void VioManager::feed_measurement_wheel(const ov_core::OdometryData &message) {
+
+    double oldest_time = state->margtimestep();
+    
+    if (oldest_time > state->_timestamp) {
+        oldest_time = -1;
+    }
+
+    if (updaterWheel != nullptr) {
+        updaterWheel->feed_measurement(message, oldest_time);
+    }
+}
+
 void VioManager::feed_measurement_simulation(double timestamp, const std::vector<int> &camids,
                                              const std::vector<std::vector<std::pair<size_t, Eigen::VectorXf>>> &feats) {
 

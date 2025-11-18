@@ -14,10 +14,13 @@ public:
     UpdaterWheel(std::shared_ptr<State> state);
 
     // Veri besleme fonksiyonu (ROS Callback'ten buraya gelecek)
-    void feed_measurement(const ov_core::OdometryData& message);
+    void feed_measurement(const ov_core::OdometryData& message, double oldest_time);
 
     // Ana güncelleme tetikleyicisi (VioManager çağıracak)
     void try_update();
+
+    std::mutex wheel_data_mtx;          // 1. Kilit mekanizması
+    std::vector<ov_core::OdometryData> wheel_data; // 2. Veri deposu
 
 private:
     // Belirli iki zaman arasındaki güncellemeyi yapan iç fonksiyon
@@ -26,6 +29,7 @@ private:
     // Zaman aralığındaki verileri seçen yardımcı fonksiyon
     bool select_wheel_data(double time0, double time1, std::vector<ov_core::OdometryData>& data_vec);
 
+    void clean_old_measurements(double oldest_time);
     // Durum (State) pointer'ı
     std::shared_ptr<State> state;
 
