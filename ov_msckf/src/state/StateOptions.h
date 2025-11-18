@@ -58,6 +58,14 @@ struct StateOptions {
   /// Bool to determine whether or not to calibrate the Gravity sensitivity
   bool do_calib_imu_g_sensitivity = false;
 
+  bool do_wheel_odometry = false;    
+
+  bool do_wheel_calib_ext = false; 
+
+  bool do_wheel_calib_int = false; 
+
+  bool do_wheel_calib_dt = false;
+
   /// IMU intrinsic models
   enum ImuModel { KALIBR, RPNG };
 
@@ -117,6 +125,11 @@ struct StateOptions {
       parser->parse_config("calib_cam_timeoffset", do_calib_camera_timeoffset);
       parser->parse_config("calib_imu_intrinsics", do_calib_imu_intrinsics);
       parser->parse_config("calib_imu_g_sensitivity", do_calib_imu_g_sensitivity);
+
+      parser->parse_config("wheel_calib_ext", do_wheel_calib_ext);
+      parser->parse_config("wheel_calib_int", do_wheel_calib_int);
+      parser->parse_config("wheel_calib_d", do_wheel_calib_dt);
+      parser->parse_config("wheel_odometry", do_wheel_odometry);
 
       // State parameters
       parser->parse_config("max_clones", max_clone_size);
