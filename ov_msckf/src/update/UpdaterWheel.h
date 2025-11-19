@@ -19,22 +19,24 @@ public:
     // Ana güncelleme tetikleyicisi (VioManager çağıracak)
     void try_update();
 
-    std::mutex wheel_data_mtx;          // 1. Kilit mekanizması
-    std::vector<ov_core::OdometryData> wheel_data; // 2. Veri deposu
+    std::mutex odometry_data_mtx;          // 1. Kilit mekanizması
+    std::vector<ov_core::OdometryData> odometry_data; // 2. Veri deposu
 
 private:
     // Belirli iki zaman arasındaki güncellemeyi yapan iç fonksiyon
     bool update(double time0, double time1);
 
     // Zaman aralığındaki verileri seçen yardımcı fonksiyon
-    bool select_wheel_data(double time0, double time1, std::vector<ov_core::OdometryData>& data_vec);
+    bool select_odometry_data(double time0, double time1, std::vector<ov_core::OdometryData>& data_vec);
 
     void clean_old_measurements(double oldest_time);
+
+    void preintegration_3D(double dt,
+                        const ov_core::OdometryData& data1,
+                        const ov_core::OdometryData& data2);
+
     // Durum (State) pointer'ı
     std::shared_ptr<State> state;
-
-    // Gelen verilerin tutulduğu ham veri yığını
-    std::deque<ov_core::OdometryData> data_stack;
 
     // Son güncelleme zamanı
     double last_updated_clone_time = -1.0;

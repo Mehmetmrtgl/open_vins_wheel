@@ -3,11 +3,11 @@
 wheel:
   noise_w: 0.2
   noise_v: 0.5
-  noise_p: 0.1
+  # noise_p: 0.1
   chi2_mult: 2
-  timeoffset: 0.0
-  intrinsics: [0.3, 0.3, 1.5]
-  reuse_of_information: false
+  # timeoffset: 0.0
+  # intrinsics: [0.3, 0.3, 1.5]
+
   T_imu_wheel:
     - [1.0, 0.0, 0.0, 0.07]
     - [0.0, 1.0, 0.0, 0.0]
