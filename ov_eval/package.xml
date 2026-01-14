@@ -2,7 +2,7 @@
 <package format="3">
 
     <!-- Package Information -->
-    <name>ov_eval</name>
+    <name>ov_eval_wheel</name>
     <version>2.7.0</version>
     <description>
         Evaluation methods and scripts for visual-inertial odometry systems.
@@ -28,12 +28,12 @@
     <depend condition="$ROS_VERSION == 1">geometry_msgs</depend>
     <depend condition="$ROS_VERSION == 1">nav_msgs</depend>
     <depend condition="$ROS_VERSION == 1">sensor_msgs</depend>
-    <depend condition="$ROS_VERSION == 1">ov_core</depend>
+    <depend condition="$ROS_VERSION == 1">ov_core_wheel</depend>
 
     <!-- ROS2: Dependencies needed to compile this package. -->
     <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
     <depend condition="$ROS_VERSION == 2">rclcpp</depend>
-    <depend condition="$ROS_VERSION == 2">ov_core</depend>
+    <depend condition="$ROS_VERSION == 2">ov_core_wheel</depend>
 
     <!-- System dependencies for both versions -->
     <depend>eigen</depend>

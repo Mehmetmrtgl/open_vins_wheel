@@ -170,8 +170,8 @@ protected:
   //=====             Subscription_wheel                    ======//
   //==============================================================//
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr sub_wheel;
-  
-  
+
+
   typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image> sync_pol;
   std::vector<std::shared_ptr<message_filters::Synchronizer<sync_pol>>> sync_cam;
   std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>>> sync_subs_cam;

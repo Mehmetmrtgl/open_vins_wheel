@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.3)
-project(ov_init)
+project(ov_init_wheel)
 
 
 # Include libraries (if we don't have opencv 4, then fallback to opencv 3)

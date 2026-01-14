@@ -110,7 +110,9 @@ struct VioManagerOptions {
    */
   void print_and_load_estimator(const std::shared_ptr<ov_core::YamlParser> &parser = nullptr) {
     PRINT_DEBUG("ESTIMATOR PARAMETERS:\n");
+    PRINT_DEBUG("state PARAMETERS:\n");
     state_options.print(parser);
+    PRINT_DEBUG("  - initialization PARAMETERS:\n");
     init_options.print_and_load(parser);
     if (parser != nullptr) {
       parser->parse_config("dt_slam_delay", dt_slam_delay);
@@ -122,16 +124,18 @@ struct VioManagerOptions {
       parser->parse_config("record_timing_information", record_timing_information);
       parser->parse_config("record_timing_filepath", record_timing_filepath);
 
+      PRINT_DEBUG("  - before wheel odometry options:\n");
+
       if(state_options.do_wheel_odometry) {
+          PRINT_DEBUG("  - Loading wheel odometry options:\n");
           parser->parse_external("relative_config_wheel", "wheel", "topic", wheel_options.topic);
           parser->parse_external("relative_config_wheel", "wheel", "noise_v", wheel_options.noise_v);
           parser->parse_external("relative_config_wheel", "wheel", "noise_w", wheel_options.noise_w);
-          parser->parse_external("relative_config_wheel", "wheel", "do_calib_ext", wheel_options.do_calib_ext);
           parser->parse_external("relative_config_wheel", "wheel", "chi2_mult", wheel_options.chi2_mult);
-          
-          // Matris okuma (Eigen overload'ı 4 parametre ile çalışır)
+
           parser->parse_external("relative_config_wheel", "wheel", "T_imu_wheel", wheel_options.T_imu_wheel);
       }
+
     }
     PRINT_DEBUG("  - dt_slam_delay: %.1f\n", dt_slam_delay);
     PRINT_DEBUG("  - zero_velocity_update: %d\n", try_zupt);
@@ -141,6 +145,22 @@ struct VioManagerOptions {
     PRINT_DEBUG("  - zupt_only_at_beginning?: %d\n", zupt_only_at_beginning);
     PRINT_DEBUG("  - record timing?: %d\n", (int)record_timing_information);
     PRINT_DEBUG("  - record timing filepath: %s\n", record_timing_filepath.c_str());
+
+    PRINT_DEBUG("  - wheel_options:\n");
+    PRINT_DEBUG("    - topic: %s\n", wheel_options.topic.c_str());
+    PRINT_DEBUG("    - noise_v: %.5f\n", wheel_options.noise_v);
+    PRINT_DEBUG("    - noise_w: %.5f\n", wheel_options.noise_w);
+    PRINT_DEBUG("    - chi2_mult: %.2f\n", wheel_options.chi2_mult);
+
+
+    PRINT_DEBUG("    - T_imu_wheel:\n");
+    for (int i = 0; i < 4; i++) {
+        PRINT_DEBUG("      % .5f % .5f % .5f % .5f\n",
+            wheel_options.T_imu_wheel(i, 0),
+            wheel_options.T_imu_wheel(i, 1),
+            wheel_options.T_imu_wheel(i, 2),
+            wheel_options.T_imu_wheel(i, 3));
+    }
   }
 
   // NOISE / CHI2 ============================

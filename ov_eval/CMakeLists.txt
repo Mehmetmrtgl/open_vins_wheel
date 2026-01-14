@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.3)
-project(ov_eval)
+project(ov_eval_wheel)
 
 # Include libraries
 find_package(Eigen3 REQUIRED)

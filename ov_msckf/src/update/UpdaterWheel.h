@@ -1,3 +1,4 @@
+/**
 #ifndef OV_MSCKF_UPDATER_WHEEL_H
 #define OV_MSCKF_UPDATER_WHEEL_H
 
@@ -45,8 +46,21 @@ private:
     Eigen::Vector3d delta_p;  // Birikmiş pozisyon değişimi
     Eigen::Matrix3d delta_R;  // Birikmiş rotasyon değişimi
     Eigen::Matrix<double, 6, 6> covariance; // Birikmiş belirsizlik
+
+    Eigen::Matrix4d T_imu_odom;  // Fixed transformation from IMU to odometry frame
+    double noise_gyro;            // Angular velocity noise std dev
+    double noise_vel;             // Linear velocity noise std dev
+
+    Eigen::Matrix3d exp_so3(const Eigen::Vector3d& omega);
+    Eigen::Vector3d log_so3(const Eigen::Matrix3d& R);
+    Eigen::Matrix3d skew_x(const Eigen::Vector3d& v);
+    ov_core::OdometryData interpolate_data(const ov_core::OdometryData& data1, const ov_core::OdometryData& data2, double timestamp);
+    bool compute_linear_system(Eigen::MatrixXd& H, Eigen::VectorXd& res,
+                            std::vector<std::shared_ptr<ov_type::Type>>& x_order,
+                            double time0, double time1);
 };
 
 } // namespace ov_msckf
 
 #endif // OV_MSCKF_UPDATER_WHEEL_H
+*/

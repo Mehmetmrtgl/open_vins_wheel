@@ -8,7 +8,7 @@ import os
 import sys
 
 launch_args = [
-    DeclareLaunchArgument(name="namespace", default_value="ov_msckf", description="namespace"),
+    DeclareLaunchArgument(name="namespace", default_value="ov_msckf_wheel", description="namespace"),
     DeclareLaunchArgument(
         name="ov_enable", default_value="true", description="enable OpenVINS node"
     ),
@@ -27,7 +27,7 @@ launch_args = [
     ),
     DeclareLaunchArgument(
         name="verbosity",
-        default_value="INFO",
+        default_value="DEBUG",
         description="ALL, DEBUG, INFO, WARNING, ERROR, SILENT",
     ),
     DeclareLaunchArgument(
@@ -50,12 +50,12 @@ launch_args = [
 def launch_setup(context):
     config_path = LaunchConfiguration("config_path").perform(context)
     if not config_path:
-        configs_dir = os.path.join(get_package_share_directory("ov_msckf"), "config")
+        configs_dir = os.path.join(get_package_share_directory("ov_msckf_wheel"), "config")
         available_configs = os.listdir(configs_dir)
         config = LaunchConfiguration("config").perform(context)
         if config in available_configs:
             config_path = os.path.join(
-                            get_package_share_directory("ov_msckf"),
+                            get_package_share_directory("ov_msckf_wheel"),
                             "config",config,"estimator_config.yaml"
                         )
         else:
@@ -75,7 +75,7 @@ def launch_setup(context):
                     )
             ]
     node1 = Node(
-        package="ov_msckf",
+        package="ov_msckf_wheel",
         executable="run_subscribe_msckf",
         condition=IfCondition(LaunchConfiguration("ov_enable")),
         namespace=LaunchConfiguration("namespace"),
@@ -96,7 +96,7 @@ def launch_setup(context):
         arguments=[
             "-d"
             + os.path.join(
-                get_package_share_directory("ov_msckf"), "launch", "display_ros2.rviz"
+                get_package_share_directory("ov_msckf_wheel"), "launch", "display_ros2.rviz"
             ),
             "--ros-args",
             "--log-level",

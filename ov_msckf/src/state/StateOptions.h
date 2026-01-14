@@ -58,11 +58,11 @@ struct StateOptions {
   /// Bool to determine whether or not to calibrate the Gravity sensitivity
   bool do_calib_imu_g_sensitivity = false;
 
-  bool do_wheel_odometry = false;    
+  bool do_wheel_odometry = false;
 
-  bool do_wheel_calib_ext = false; 
+  bool do_wheel_calib_ext = false;
 
-  bool do_wheel_calib_int = false; 
+  bool do_wheel_calib_int = false;
 
   bool do_wheel_calib_dt = false;
 
@@ -128,7 +128,7 @@ struct StateOptions {
 
       parser->parse_config("wheel_calib_ext", do_wheel_calib_ext);
       parser->parse_config("wheel_calib_int", do_wheel_calib_int);
-      parser->parse_config("wheel_calib_d", do_wheel_calib_dt);
+      parser->parse_config("wheel_calib_dt", do_wheel_calib_dt);
       parser->parse_config("wheel_odometry", do_wheel_odometry);
 
       // State parameters
@@ -185,6 +185,11 @@ struct StateOptions {
     PRINT_DEBUG("  - feat_rep_msckf: %s\n", ov_type::LandmarkRepresentation::as_string(feat_rep_msckf).c_str());
     PRINT_DEBUG("  - feat_rep_slam: %s\n", ov_type::LandmarkRepresentation::as_string(feat_rep_slam).c_str());
     PRINT_DEBUG("  - feat_rep_aruco: %s\n", ov_type::LandmarkRepresentation::as_string(feat_rep_aruco).c_str());
+
+    PRINT_DEBUG("  - wheel_odometry: %d\n", do_wheel_odometry);
+    PRINT_DEBUG("  - wheel_calib_ext: %d\n", do_wheel_calib_ext);
+    PRINT_DEBUG("  - wheel_calib_int: %d\n", do_wheel_calib_int);
+    PRINT_DEBUG("  - wheel_calib_dt: %d\n", do_wheel_calib_dt);
   }
 };
 

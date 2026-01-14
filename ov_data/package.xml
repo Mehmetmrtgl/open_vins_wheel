@@ -2,7 +2,7 @@
 <package format="3">
 
     <!-- Package Information -->
-    <name>ov_data</name>
+    <name>ov_data_wheel</name>
     <version>2.7.0</version>
     <description>
         Data for the OpenVINS project, mostly just groundtruth files...

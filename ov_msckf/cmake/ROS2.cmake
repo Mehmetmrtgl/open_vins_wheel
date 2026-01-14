@@ -11,8 +11,8 @@ find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(image_transport REQUIRED)
-find_package(ov_core REQUIRED)
-find_package(ov_init REQUIRED)
+find_package(ov_core_wheel REQUIRED)
+find_package(ov_init_wheel REQUIRED)
 
 # Describe ROS project
 option(ENABLE_ROS "Enable or disable building with ROS (if it is found)" ON)
@@ -45,8 +45,8 @@ list(APPEND ament_libraries
         nav_msgs
         cv_bridge
         image_transport
-        ov_core
-        ov_init
+        ov_core_wheel
+        ov_init_wheel
 )
 
 ##################################################
@@ -54,6 +54,7 @@ list(APPEND ament_libraries
 ##################################################
 
 list(APPEND LIBRARY_SOURCES
+        src/update/OptionsWheel.h
         src/dummy.cpp
         src/sim/Simulator.cpp
         src/state/State.cpp
@@ -69,11 +70,11 @@ list(APPEND LIBRARY_SOURCES
 )
 list(APPEND LIBRARY_SOURCES src/ros/ROS2Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")
-add_library(ov_msckf_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
-ament_target_dependencies(ov_msckf_lib ${ament_libraries})
-target_link_libraries(ov_msckf_lib ${thirdparty_libraries})
-target_include_directories(ov_msckf_lib PUBLIC src/)
-install(TARGETS ov_msckf_lib
+add_library(ov_msckf_wheel_lib SHARED ${LIBRARY_SOURCES} ${LIBRARY_HEADERS})
+ament_target_dependencies(ov_msckf_wheel_lib ${ament_libraries})
+target_link_libraries(ov_msckf_wheel_lib ${thirdparty_libraries})
+target_include_directories(ov_msckf_wheel_lib PUBLIC src/)
+install(TARGETS ov_msckf_wheel_lib
         LIBRARY DESTINATION lib
         RUNTIME DESTINATION bin
         PUBLIC_HEADER DESTINATION include
@@ -83,7 +84,7 @@ install(DIRECTORY src/
         FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )
 ament_export_include_directories(include)
-ament_export_libraries(ov_msckf_lib)
+ament_export_libraries(ov_msckf_wheel_lib)
 
 ##################################################
 # Make binary files!
@@ -91,22 +92,22 @@ ament_export_libraries(ov_msckf_lib)
 
 add_executable(run_subscribe_msckf src/run_subscribe_msckf.cpp)
 ament_target_dependencies(run_subscribe_msckf ${ament_libraries})
-target_link_libraries(run_subscribe_msckf ov_msckf_lib ${thirdparty_libraries})
+target_link_libraries(run_subscribe_msckf ov_msckf_wheel_lib ${thirdparty_libraries})
 install(TARGETS run_subscribe_msckf DESTINATION lib/${PROJECT_NAME})
 
 add_executable(run_simulation src/run_simulation.cpp)
 ament_target_dependencies(run_simulation ${ament_libraries})
-target_link_libraries(run_simulation ov_msckf_lib ${thirdparty_libraries})
+target_link_libraries(run_simulation ov_msckf_wheel_lib ${thirdparty_libraries})
 install(TARGETS run_simulation DESTINATION lib/${PROJECT_NAME})
 
 add_executable(test_sim_meas src/test_sim_meas.cpp)
 ament_target_dependencies(test_sim_meas ${ament_libraries})
-target_link_libraries(test_sim_meas ov_msckf_lib ${thirdparty_libraries})
+target_link_libraries(test_sim_meas ov_msckf_wheel_lib ${thirdparty_libraries})
 install(TARGETS test_sim_meas DESTINATION lib/${PROJECT_NAME})
 
 add_executable(test_sim_repeat src/test_sim_repeat.cpp)
 ament_target_dependencies(test_sim_repeat ${ament_libraries})
-target_link_libraries(test_sim_repeat ov_msckf_lib ${thirdparty_libraries})
+target_link_libraries(test_sim_repeat ov_msckf_wheel_lib ${thirdparty_libraries})
 install(TARGETS test_sim_repeat DESTINATION lib/${PROJECT_NAME})
 
 # Install launch and config directories

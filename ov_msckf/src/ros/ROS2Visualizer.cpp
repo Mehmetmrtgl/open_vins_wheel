@@ -177,19 +177,29 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
   //==============================================================//
   //=====             Subscription_wheel                    ======//
   //==============================================================//
+
+
   if(_app->get_params().state_options.do_wheel_odometry){
+
+    PRINT_DEBUG("Wheel odometry enabled, setting up subscription.\n");
+
     std::string topic_wheel;
     _node->declare_parameter<std::string>("topic_wheel", "/wheel_odom");
     _node->get_parameter("topic_wheel", topic_wheel);
-    parser->parse_external("relative_config_wheel", "wheel0", "rostopic", topic_wheel);
+    parser->parse_external("relative_config_wheel", "wheel", "topic", topic_wheel);
+
     sub_wheel = _node->create_subscription<nav_msgs::msg::Odometry>(
-        topic_wheel, 
+        topic_wheel,
         rclcpp::SensorDataQoS(),
         std::bind(&ROS2Visualizer::callback_wheel, this, std::placeholders::_1)
     );
-    
-    PRINT_INFO("subscribing to wheel odom: %s\n", topic_wheel.c_str());
+
+    PRINT_DEBUG("subscribing to wheel odom: %s\n", topic_wheel.c_str());
+  }else {
+    PRINT_DEBUG("Wheel odometry not enabled, skipping subscription.\n");
   }
+
+
 
 
   // Logic for sync stereo subscriber
@@ -625,7 +635,15 @@ void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::Sha
     }
   }
 
-  _app->feed_measurement_wheel(data);
+
+  // --- DEBUG BAŞLANGIÇ ---
+  PRINT_INFO(GREEN "[WHEEL-DATA] Time: %.4f | Lin: [%.2f %.2f %.2f] | Ang: [%.2f %.2f %.2f]\n" RESET,
+             data.timestamp,
+             data.linear_velocity(0), data.linear_velocity(1), data.linear_velocity(2),
+             data.angular_velocity(0), data.angular_velocity(1), data.angular_velocity(2));
+
+
+  // _app->feed_measurement_wheel(data);
 }
 
 void ROS2Visualizer::publish_state() {

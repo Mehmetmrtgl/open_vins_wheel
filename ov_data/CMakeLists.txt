@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.3)
-project(ov_data)
+project(ov_data_wheel)
 
 # Find our ROS version!
 # NOTE: Default to using the ROS1 package if both are in our enviroment

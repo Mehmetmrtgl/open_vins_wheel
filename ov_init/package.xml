@@ -2,7 +2,7 @@
 <package format="3">
 
     <!-- Package Information -->
-    <name>ov_init</name>
+    <name>ov_init_wheel</name>
     <version>2.7.0</version>
     <description>
         Initialization package which handles static and dynamic initialization.
@@ -25,13 +25,13 @@
     <depend condition="$ROS_VERSION == 1">cmake_modules</depend>
     <depend condition="$ROS_VERSION == 1">roscpp</depend>
     <depend condition="$ROS_VERSION == 1">cv_bridge</depend>
-    <depend condition="$ROS_VERSION == 1">ov_core</depend>
+    <depend condition="$ROS_VERSION == 1">ov_core_wheel</depend>
 
     <!-- ROS2: Dependencies needed to compile this package. -->
     <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
     <depend condition="$ROS_VERSION == 2">rclcpp</depend>
     <depend condition="$ROS_VERSION == 2">cv_bridge</depend>
-    <depend condition="$ROS_VERSION == 2">ov_core</depend>
+    <depend condition="$ROS_VERSION == 2">ov_core_wheel</depend>
 
     <!-- System dependencies for both versions -->
     <depend>eigen</depend>

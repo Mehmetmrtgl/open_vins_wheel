@@ -112,12 +112,14 @@ int main(int argc, char **argv) {
   executor.spin();
 #endif
 
-  // Final visualization
-  viz->visualize_final();
+#if ROS_AVAILABLE == 1 || ROS_AVAILABLE == 2
+viz->visualize_final();
+#endif
+
 #if ROS_AVAILABLE == 1
-  ros::shutdown();
+ros::shutdown();
 #elif ROS_AVAILABLE == 2
-  rclcpp::shutdown();
+rclcpp::shutdown();
 #endif
 
   // Done!

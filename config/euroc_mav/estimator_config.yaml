@@ -1,6 +1,6 @@
 %YAML:1.0 # need to specify the file type at the top!
 
-verbosity: "INFO" # ALL, DEBUG, INFO, WARNING, ERROR, SILENT
+verbosity: "DEBUG" # ALL, DEBUG, INFO, WARNING, ERROR, SILENT
 
 use_fej: true # if first-estimate Jacobians should be used (enable for good consistency)
 integration: "rk4" # discrete, rk4, analytical (if rk4 or analytical used then analytical covariance propagation is used)
@@ -12,6 +12,11 @@ calib_cam_intrinsics: true # if camera intrinsics should be optimized (focal, ce
 calib_cam_timeoffset: true # if timeoffset between camera and IMU should be optimized
 calib_imu_intrinsics: false # if imu intrinsics should be calibrated (rotation and skew-scale matrix)
 calib_imu_g_sensitivity: false # if gyroscope gravity sensitivity (Tg) should be calibrated
+
+wheel_odometry : false
+wheel_calib_ext : false
+wheel_calib_int : false
+wheel_calib_dt : false
 
 max_clones: 11 # how many clones in the sliding window
 max_slam: 50 # number of features in our state vector
