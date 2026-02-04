@@ -161,12 +161,12 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
                                                         propagator, params.gravity_mag, params.zupt_max_velocity,
                                                         params.zupt_noise_multiplier, params.zupt_max_disparity);
   }
-/**
-  if (params.wheel_options.enabled) {
+
+  if (params.state_options.do_wheel_odometry) {
     updaterWheel = std::make_shared<UpdaterWheel>(state);
     PRINT_INFO("UpdaterWheel initialized!\n");
   }
-  */
+
 }
 
 void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
@@ -193,7 +193,7 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
     updaterZUPT->feed_imu(message, oldest_time);
   }
 }
-/**
+
 void VioManager::feed_measurement_wheel(const ov_core::OdometryData &message) {
 
     double oldest_time = state->margtimestep();
@@ -205,8 +205,9 @@ void VioManager::feed_measurement_wheel(const ov_core::OdometryData &message) {
     if (updaterWheel != nullptr) {
         updaterWheel->feed_measurement(message, oldest_time);
     }
+
 }
-*/
+
 void VioManager::feed_measurement_simulation(double timestamp, const std::vector<int> &camids,
                                              const std::vector<std::vector<std::pair<size_t, Eigen::VectorXf>>> &feats) {
 

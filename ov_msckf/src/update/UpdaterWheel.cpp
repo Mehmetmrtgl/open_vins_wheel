@@ -1,5 +1,3 @@
-/**
-
 #include "UpdaterWheel.h"
 #include "utils/print.h"
 #include "state/StateHelper.h"
@@ -172,6 +170,107 @@ void UpdaterWheel::clean_old_measurements(double oldest_time) {
     }
 }
 
+void UpdaterWheel::preintegration_3D_RK4(double dt, const OdometryData& data1, const OdometryData& data2) {
+    // Transform velocities from odometry frame to IMU frame using fixed extrinsics
+    Eigen::Matrix3d R_ItoO = T_imu_odom.block<3,3>(0,0);
+    Eigen::Vector3d p_IinO = T_imu_odom.block<3,1>(0,3);
+
+    // Get angular and linear velocities from odometry at both timesteps
+    Eigen::Vector3d w1_odom = data1.angular_velocity;
+    Eigen::Vector3d v1_odom = data1.linear_velocity;
+    Eigen::Vector3d w2_odom = data2.angular_velocity;
+    Eigen::Vector3d v2_odom = data2.linear_velocity;
+
+    // Transform to IMU frame
+    Eigen::Vector3d w1 = R_ItoO.transpose() * w1_odom;
+    Eigen::Vector3d v1 = R_ItoO.transpose() * (v1_odom - w1_odom.cross(p_IinO));
+    Eigen::Vector3d w2 = R_ItoO.transpose() * w2_odom;
+    Eigen::Vector3d v2 = R_ItoO.transpose() * (v2_odom - w2_odom.cross(p_IinO));
+
+    // Compute acceleration (for RK4)
+    Eigen::Vector3d w_alpha = (w2 - w1) / dt;
+    Eigen::Vector3d v_jerk = (v2 - v1) / dt;
+
+    // Current state
+    Eigen::Matrix3d R_current = delta_R;
+    Eigen::Vector3d p_current = delta_p;
+    Eigen::Vector4d q_current = rot_2_quat(R_current);
+
+    // RK4 Integration
+    // k1 ================
+    Eigen::Vector3d w_k1 = w1;
+    Eigen::Vector3d v_k1 = v1;
+    Eigen::Vector4d dq_0 = Eigen::Vector4d(0, 0, 0, 1);
+    Eigen::Vector4d q0_dot = 0.5 * Omega(w_k1) * dq_0;
+    Eigen::Matrix3d R_k1 = quat_2_Rot(quat_multiply(dq_0, q_current));
+    Eigen::Vector3d p0_dot = R_k1.transpose() * v_k1;
+    Eigen::Vector4d k1_q = q0_dot * dt;
+    Eigen::Vector3d k1_p = p0_dot * dt;
+
+    // k2 ================
+    Eigen::Vector3d w_k2 = w1 + 0.5 * w_alpha * dt;
+    Eigen::Vector3d v_k2 = v1 + 0.5 * v_jerk * dt;
+    Eigen::Vector4d dq_1 = quatnorm(dq_0 + 0.5 * k1_q);
+    Eigen::Vector4d q1_dot = 0.5 * Omega(w_k2) * dq_1;
+    Eigen::Matrix3d R_k2 = quat_2_Rot(quat_multiply(dq_1, q_current));
+    Eigen::Vector3d p1_dot = R_k2.transpose() * v_k2;
+    Eigen::Vector4d k2_q = q1_dot * dt;
+    Eigen::Vector3d k2_p = p1_dot * dt;
+
+    // k3 ================
+    Eigen::Vector3d w_k3 = w_k2;
+    Eigen::Vector3d v_k3 = v_k2;
+    Eigen::Vector4d dq_2 = quatnorm(dq_0 + 0.5 * k2_q);
+    Eigen::Vector4d q2_dot = 0.5 * Omega(w_k3) * dq_2;
+    Eigen::Matrix3d R_k3 = quat_2_Rot(quat_multiply(dq_2, q_current));
+    Eigen::Vector3d p2_dot = R_k3.transpose() * v_k3;
+    Eigen::Vector4d k3_q = q2_dot * dt;
+    Eigen::Vector3d k3_p = p2_dot * dt;
+
+    // k4 ================
+    Eigen::Vector3d w_k4 = w1 + w_alpha * dt;
+    Eigen::Vector3d v_k4 = v1 + v_jerk * dt;
+    Eigen::Vector4d dq_3 = quatnorm(dq_0 + k3_q);
+    Eigen::Vector4d q3_dot = 0.5 * Omega(w_k4) * dq_3;
+    Eigen::Matrix3d R_k4 = quat_2_Rot(quat_multiply(dq_3, q_current));
+    Eigen::Vector3d p3_dot = R_k4.transpose() * v_k4;
+    Eigen::Vector4d k4_q = q3_dot * dt;
+    Eigen::Vector3d k4_p = p3_dot * dt;
+
+    // Combine using RK4 formula
+    Eigen::Vector4d dq = quatnorm(dq_0 + (1.0/6.0)*k1_q + (1.0/3.0)*k2_q + (1.0/3.0)*k3_q + (1.0/6.0)*k4_q);
+    Eigen::Vector4d q_new = quat_multiply(dq, q_current);
+    Eigen::Matrix3d R_new = quat_2_Rot(q_new);
+    Eigen::Vector3d p_new = p_current + (1.0/6.0)*k1_p + (1.0/3.0)*k2_p + (1.0/3.0)*k3_p + (1.0/6.0)*k4_p;
+
+    // Compute Jacobians for covariance propagation
+    // Use linearization around the integrated trajectory
+    Eigen::Matrix<double, 6, 6> Phi_tr = Eigen::Matrix<double, 6, 6>::Identity();
+    Phi_tr.block<3,3>(0,0) = R_new * R_current.transpose();
+    Phi_tr.block<3,3>(3,0) = -R_current.transpose() * skew_x(R_current.transpose() * (p_new - p_current));
+    Phi_tr.block<3,3>(3,3) = Eigen::Matrix3d::Identity();
+
+    // Noise Jacobian
+    Eigen::Matrix<double, 6, 6> Phi_ns = Eigen::Matrix<double, 6, 6>::Zero();
+    Phi_ns.block<3,3>(0,0) = dt * Eigen::Matrix3d::Identity();
+    Phi_ns.block<3,3>(3,3) = R_current.transpose() * dt;
+
+    // Process noise covariance
+    Eigen::Matrix<double, 6, 6> Q = Eigen::Matrix<double, 6, 6>::Zero();
+    Q.block<3,3>(0,0) = (noise_gyro * noise_gyro / dt) * Eigen::Matrix3d::Identity();
+    Q.block<3,3>(3,3) = (noise_vel * noise_vel / dt) * Eigen::Matrix3d::Identity();
+
+    // Propagate covariance
+    covariance = Phi_tr * covariance * Phi_tr.transpose() + Phi_ns * Q * Phi_ns.transpose();
+
+    // Ensure symmetry
+    covariance = 0.5 * (covariance + covariance.transpose());
+
+    // Update preintegrated values
+    delta_R = R_new;
+    delta_p = p_new;
+}
+
 
 void UpdaterWheel::preintegration_3D(double dt, const OdometryData& data1, const OdometryData& data2) {
     // Get angular and linear velocities from odometry
@@ -265,6 +364,7 @@ bool UpdaterWheel::compute_linear_system(Eigen::MatrixXd& H, Eigen::VectorXd& re
     H = Eigen::MatrixXd::Zero(6, H_size);
 
     // Jacobian wrt pose0
+
     Eigen::Matrix3d J_rot_R0 = -R_ItoO * R_GtoI1 * R_GtoI0.transpose();
     Eigen::Matrix3d J_pos_R0 = R_ItoO * skew_x(R_GtoI0 * (p_I1inG + R_GtoI1.transpose() * p_OinI - p_I0inG));
     Eigen::Matrix3d J_pos_p0 = -R_ItoO * R_GtoI0;
@@ -340,4 +440,81 @@ Eigen::Matrix3d UpdaterWheel::skew_x(const Eigen::Vector3d& v) {
             -v(1), v(0), 0;
     return skew;
 }
-*/
+
+
+
+Eigen::Vector4d UpdaterWheel::rot_2_quat(const Eigen::Matrix3d& R) {
+    Eigen::Vector4d q;
+    double T = R.trace();
+    if (T > 0) {
+        double S = sqrt(T + 1.0) * 2.0;
+        q(0) = (R(2,1) - R(1,2)) / S;
+        q(1) = (R(0,2) - R(2,0)) / S;
+        q(2) = (R(1,0) - R(0,1)) / S;
+        q(3) = 0.25 * S;
+    } else if (R(0,0) > R(1,1) && R(0,0) > R(2,2)) {
+        double S = sqrt(1.0 + R(0,0) - R(1,1) - R(2,2)) * 2.0;
+        q(0) = 0.25 * S;
+        q(1) = (R(0,1) + R(1,0)) / S;
+        q(2) = (R(0,2) + R(2,0)) / S;
+        q(3) = (R(2,1) - R(1,2)) / S;
+    } else if (R(1,1) > R(2,2)) {
+        double S = sqrt(1.0 + R(1,1) - R(0,0) - R(2,2)) * 2.0;
+        q(0) = (R(0,1) + R(1,0)) / S;
+        q(1) = 0.25 * S;
+        q(2) = (R(1,2) + R(2,1)) / S;
+        q(3) = (R(0,2) - R(2,0)) / S;
+    } else {
+        double S = sqrt(1.0 + R(2,2) - R(0,0) - R(1,1)) * 2.0;
+        q(0) = (R(0,2) + R(2,0)) / S;
+        q(1) = (R(1,2) + R(2,1)) / S;
+        q(2) = 0.25 * S;
+        q(3) = (R(1,0) - R(0,1)) / S;
+    }
+    return q / q.norm();
+}
+
+
+Eigen::Matrix3d UpdaterWheel::quat_2_Rot(const Eigen::Vector4d& q) {
+    Eigen::Matrix3d R;
+    double qx = q(0), qy = q(1), qz = q(2), qw = q(3);
+
+    R(0,0) = 1 - 2*qy*qy - 2*qz*qz;
+    R(0,1) = 2*qx*qy - 2*qz*qw;
+    R(0,2) = 2*qx*qz + 2*qy*qw;
+
+    R(1,0) = 2*qx*qy + 2*qz*qw;
+    R(1,1) = 1 - 2*qx*qx - 2*qz*qz;
+    R(1,2) = 2*qy*qz - 2*qx*qw;
+
+    R(2,0) = 2*qx*qz - 2*qy*qw;
+    R(2,1) = 2*qy*qz + 2*qx*qw;
+    R(2,2) = 1 - 2*qx*qx - 2*qy*qy;
+
+    return R;
+}
+
+
+Eigen::Vector4d UpdaterWheel::quat_multiply(const Eigen::Vector4d& q1, const Eigen::Vector4d& q2) {
+    Eigen::Vector4d q;
+    q(0) = q1(3)*q2(0) + q1(0)*q2(3) + q1(1)*q2(2) - q1(2)*q2(1);
+    q(1) = q1(3)*q2(1) - q1(0)*q2(2) + q1(1)*q2(3) + q1(2)*q2(0);
+    q(2) = q1(3)*q2(2) + q1(0)*q2(1) - q1(1)*q2(0) + q1(2)*q2(3);
+    q(3) = q1(3)*q2(3) - q1(0)*q2(0) - q1(1)*q2(1) - q1(2)*q2(2);
+    return q;
+}
+
+
+Eigen::Vector4d UpdaterWheel::quatnorm(const Eigen::Vector4d& q) {
+    return q / q.norm();
+}
+
+
+Eigen::Matrix4d UpdaterWheel::Omega(const Eigen::Vector3d& w) {
+    Eigen::Matrix4d Omega;
+    Omega << 0, w(2), -w(1), w(0),
+             -w(2), 0, w(0), w(1),
+             w(1), -w(0), 0, w(2),
+             -w(0), -w(1), -w(2), 0;
+    return Omega;
+}

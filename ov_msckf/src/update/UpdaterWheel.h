@@ -1,4 +1,3 @@
-/**
 #ifndef OV_MSCKF_UPDATER_WHEEL_H
 #define OV_MSCKF_UPDATER_WHEEL_H
 
@@ -36,6 +35,14 @@ private:
                         const ov_core::OdometryData& data1,
                         const ov_core::OdometryData& data2);
 
+    void preintegration_3D_RK4(double dt,
+                        const ov_core::OdometryData& data1,
+                        const ov_core::OdometryData& data2);
+
+    bool compute_linear_system(Eigen::MatrixXd& H, Eigen::VectorXd& res,
+                        std::vector<std::shared_ptr<ov_type::Type>>& x_order,
+                        double time0, double time1);
+
     // Durum (State) pointer'ı
     std::shared_ptr<State> state;
 
@@ -55,12 +62,15 @@ private:
     Eigen::Vector3d log_so3(const Eigen::Matrix3d& R);
     Eigen::Matrix3d skew_x(const Eigen::Vector3d& v);
     ov_core::OdometryData interpolate_data(const ov_core::OdometryData& data1, const ov_core::OdometryData& data2, double timestamp);
-    bool compute_linear_system(Eigen::MatrixXd& H, Eigen::VectorXd& res,
-                            std::vector<std::shared_ptr<ov_type::Type>>& x_order,
-                            double time0, double time1);
+
+    Eigen::Vector4d rot_2_quat(const Eigen::Matrix3d& R);
+    Eigen::Matrix3d quat_2_Rot(const Eigen::Vector4d& q);
+    Eigen::Vector4d quat_multiply(const Eigen::Vector4d& q1, const Eigen::Vector4d& q2);
+    Eigen::Vector4d quatnorm(const Eigen::Vector4d& q);
+    Eigen::Matrix4d Omega(const Eigen::Vector3d& w);
 };
 
 } // namespace ov_msckf
 
 #endif // OV_MSCKF_UPDATER_WHEEL_H
-*/
+
