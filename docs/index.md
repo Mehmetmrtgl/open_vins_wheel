@@ -1,4 +1,4 @@
-# NeuRo-Lab | Görsel-Eylemsiz Navigasyon Sistemleri Araştırma Merkezi
+# NeuRo-Lab
 
 Hacettepe Üniversitesi Elektrik ve Elektronik Mühendisliği Bölümü bünyesinde, Doç. Dr. İsmail Uyanık liderliğinde yürütülen bu çalışma alanı; GPS bağımsız otonom navigasyon, sensör füzyonu ve Visual-Inertial Odometry (VIO) algoritmalarının geliştirilmesine odaklanmaktadır.
 
