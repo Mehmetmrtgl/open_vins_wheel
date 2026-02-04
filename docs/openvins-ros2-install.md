@@ -2,13 +2,13 @@
 
 Bu doküman, OpenVINS algoritmasının ROS 2 (Humble/Foxy) ortamında sıfırdan kurulumunu kapsar.
 
-## 📋 Gereksinimler
+##  Gereksinimler
 * **Ubuntu:** 22.04 (Humble için)
 * **ROS 2:** Humble Hawksbill (Önerilen)
 * **OpenCV:** 3.2+
 * **Eigen:** 3.3+
 
-## 🛠️ Kurulum Adımları
+##  Kurulum Adımları
 
 ### 1. Çalışma Alanının Oluşturulması
 Öncelikle ROS 2 workspace'inizi oluşturun:
