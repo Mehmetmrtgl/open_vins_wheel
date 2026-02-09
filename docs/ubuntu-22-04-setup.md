@@ -47,37 +47,39 @@ SDK Manager'ın stabil çalışmadığı durumlarda veya A608 gibi özel taşıy
 
 Cihazın flaşlanabilmesi için aşağıdaki adımlar takip edilerek Recovery Mode aktif edilmelidir:
 
-    Cihazın enerjisini tamamen kesin.
+1. Cihazın enerjisini tamamen kesin.
 
-    USB Type-C kablosu ile Host PC bağlantısını gerçekleştirin.
+2. USB Type-C kablosu ile Host PC bağlantısını gerçekleştirin.
 
-    A608 kartı üzerindeki Recovery header'ında bulunan Pin 1 ve Pin 2'yi kısa devre yapın.
+3. A608 kartı üzerindeki Recovery header'ında bulunan Pin 1 ve Pin 2'yi kısa devre yapın.
 
-    Cihaza güç verin.
+4. Cihaza güç verin.
 
-    Host PC terminalinde lsusb komutu ile cihazın tanındığını doğrulayın:
-    Bash
-
+5. Host PC terminalinde lsusb komutu ile cihazın tanındığını doğrulayın:
+    ```bash
     lsusb | grep -i "NVIDIA Corp"
-
+    ```
 ### 3.2. Dosya Sisteminin Hazırlanması
 
 Sürücülerin ve kök dosya sisteminin (rootfs) Host PC üzerinde yapılandırılması:
 Bash
 
 #### Sürücü paketini ve rootfs'i açma
+```bash
 tar xf Jetson_Linux_R36.4.3_aarch64.tbz2
 sudo tar xpf Tegra_Linux_Sample-Root-Filesystem_R36.4.3_aarch64.tbz2 -C Linux_for_Tegra/rootfs/
-
+```
 #### A608 çevre birimi sürücülerinin entegrasyonu
+```bash
 sudo tar zxpf 608_jp62.tar.gz
 sudo cp -r 608_jp62/Linux_for_Tegra/* Linux_for_Tegra/
 cd Linux_for_Tegra/
-
+```
 #### Bağımlılıkların ve ikili dosyaların uygulanması
+```bash
 sudo ./tools/l4t_flash_prerequisites.sh
 sudo ./apply_binaries.sh
-
+```
 ###  3.3. NVMe Üzerine Sistem Yükleme
 
 Sistemi A608 üzerindeki NVMe depolama birimine yüklemek için aşağıdaki komutu çalıştırın:

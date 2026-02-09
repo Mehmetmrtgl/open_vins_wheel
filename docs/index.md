@@ -10,40 +10,33 @@ Bu dokümantasyon, laboratuvarımızda yürütülen VINS çalışmalarının kur
 Navigasyon algoritmalarının kararlı çalışabilmesi için gerekli temel yazılım katmanları ve ortam kurulumları.
 
 * [İşletim Sistemi ve ROS 2 Humble Kurulumu](env-setup.md)
-* [Temel Kütüphaneler ve Bağımlılıklar (Eigen, OpenCV, Ceres)]
+* [OpenVINS Kurulumu ve Temel Kütüphaneler (Eigen, OpenCV, Ceres)](openvins-ros2-install.md)
+
+## 2. Sensör Sisteminin Ros2 Sisteminde çalıştırılması
+* [ZEDX Kamera ve ZEDX Capture Card](zed-link-mono-orin-nano.md)
+* [Xsens IMU](Xsens-IMU.md)
 
 
-## 2. Sensör Kalibrasyon Süreçleri
+## 3. Sensör Kalibrasyon Süreçleri
 VIO algoritmalarında yüksek hassasiyet için gereken kamera ve IMU kalibrasyon metodolojileri.
 
-* [Kalibr Toolbox ile Kamera-IMU Kalibrasyonu]
-* [İçsel (Intrinsic) ve Dışsal (Extrinsic) Parametrelerin Belirlenmesi]
-* [IMU Gürültü Karakterizasyonu ve Allan Variance Analizi]
+* [IMU Gürültü Karakterizasyonu ve Allan Variance Analizi](allan-variance.md)
+* [Kalibr Toolbox ile Kamera-IMU Kalibrasyonu](kalibr.md)
 
-## 3. VIO Algoritmaları ve Uygulama
-Laboratuvarımızda kullanılan ana algoritmalar ve yapılandırma parametreleri.
+## 4. Tekerlekli Robot Sistemin Çalıştırılması
 
-* [OpenVINS ROS 2 Kurulum ve Konfigürasyon Rehberi](openvins-ros2-install.md)
-* [Multi-State Constraint Kalman Filter (MSCKF) Teorik Temelleri](vio-bilgi.md)
-* [Veri Setleri (EuRoC, Kaist Urban) ile Test ve Benchmarking]
+Bu bölümde, 4 tekerlekli mobil robot sisteminin çalıştırılması için gerekli olan
+temel yazılım bileşenlerinin kurulumu ve yapılandırılması ele alınmaktadır.
 
-## 4. Kinematik Modelleme ve Veri Seti İşleme
-Özel veri setleri için gereken kinematik modeller ve mesaj dönüşümleri.
+Aşağıdaki paketlerin kurulmuş ve doğru şekilde yapılandırılmış olması gerekmektedir:
 
-* [Ackermann Direksiyon Sistemi Kinematik Modeli](
-* [Kaist Urban Veri Seti için Odometri Mesajı Üretimi]
+* [micro-ROS Kurulumu](mirco-ros.md)
 
-## 5. Odometri ve Sensör Entegrasyonu
-Tekerlek odometrisi verilerinin ana algoritmaya füzyonu ve preintegration teknikleri.
-
-* [Tekerlek Odometrisi ve Preintegration Entegrasyonu]
-
-## 6. Analiz, Görselleştirme ve Değerlendirme
+* [Robot Localization Paketi Kurulumu](robot-localization.md)
+## 5. Rapor ve Analizler
 Tahmin sonuçlarının doğrulanması ve performans ölçümü.
 
-* [EVO Aracı ile Yörünge Analizi (RPE/ATE)]
-* [RViz 2 Görselleştirme ve Hata Ayıklama Ayarları]
-
+* [EVO Aracı ile Yörünge Analizi (RPE/ATE)](evo.md)
 ---
 
 **İletişim ve Katkı:**

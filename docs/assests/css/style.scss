@@ -1,0 +1,21 @@
+---
+---
+@import "{{ site.theme }}";
+
+// Standart metin içindeki linkler
+a {
+  color: #303030; // Koyu gri (Mavi yerine istediğin rengi buraya yaz)
+  text-wrap: wrap;
+  transition: color 0.2s ease-in-out;
+
+  // Mouse ile üzerine gelince ne olacağı
+  &:hover {
+    color: #159957; // Cayman yeşili veya kurumsal bir renk
+    text-decoration: underline;
+  }
+}
+
+// Navigasyon menüsündeki linkleri de etkilemek istersen:
+.main-content a {
+  font-weight: 500;
+}

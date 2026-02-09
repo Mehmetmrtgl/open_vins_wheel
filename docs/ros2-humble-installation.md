@@ -1,4 +1,4 @@
-# ROS 2 Humble Hawksbill Kurulum ve Yapılandırma Rehberi
+# ROS 2 Humble Hawksbill Kurulum 
 
 Bu döküman, Ubuntu 22.04 (Jammy Jellyfish) işletim sistemi üzerinde çalışan NVIDIA Jetson cihazları için ROS 2 Humble Hawksbill sürümünün kurulum prosedürlerini içermektedir. Bu kurulum, laboratuvarımızdaki otonom navigasyon ve VIO çalışmaları için gerekli olan temel iletişim altyapısını sağlar.
 
