@@ -1,0 +1,40 @@
+---
+---
+// Temayı içeri aktar (Değişkenlerden sonra gelmesi daha güvenlidir)
+@import "{{ site.theme }}";
+
+/* ================================
+   NeuRo-Lab Özel Stilleri
+   ================================ */
+
+// Header Arka Planı (Mavi -> Mor)
+.page-header {
+  background-image: linear-gradient(135deg, #3b5cff, #7b4cff) !important;
+  color: #ffffff;
+}
+
+// Logo Ekleme
+.project-name::before {
+  content: "";
+  display: inline-block;
+  // Site kök dizinine göre dinamik yol
+  background-image: url("{{ '/assets/images/neurolab_logo.png' | relative_url }}");
+  background-size: contain;
+  background-repeat: no-repeat;
+  width: 52px;
+  height: 52px;
+  margin-right: 14px;
+  vertical-align: middle;
+}
+
+// Link Renkleri
+a {
+  color: #303030;
+  text-decoration: none;
+  transition: color 0.2s ease-in-out;
+
+  &:hover {
+    color: #159957;
+    text-decoration: underline;
+  }
+}
