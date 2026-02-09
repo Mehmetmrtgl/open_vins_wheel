@@ -1,3 +1,13 @@
-title: NeuRo-Lab VINS Research
+title: HU NeuRo-Lab
 description: ROS 2 Wheel Odometry Integration for OpenVINS
+
 theme: jekyll-theme-cayman
+
+# Logo path
+logo: /assets/images/neurolab_logo.png
+
+# Header renkleri (mavi → mor)
+header_background: linear-gradient(135deg, #3b5cff, #7b4cff)
+header_text_color: "#ffffff"
+
+show_downloads: false

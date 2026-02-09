@@ -4,18 +4,46 @@
 
 // Standart metin içindeki linkler
 a {
-  color: #303030; // Koyu gri (Mavi yerine istediğin rengi buraya yaz)
+  color: #303030; // Koyu gri
   text-wrap: wrap;
   transition: color 0.2s ease-in-out;
 
-  // Mouse ile üzerine gelince ne olacağı
   &:hover {
-    color: #159957; // Cayman yeşili veya kurumsal bir renk
+    color: #159957; // Cayman yeşili
     text-decoration: underline;
   }
 }
 
-// Navigasyon menüsündeki linkleri de etkilemek istersen:
+// İçerik alanındaki linkler
 .main-content a {
   font-weight: 500;
+}
+
+/* ================================
+   NeuRo-Lab Header + Logo
+   ================================ */
+
+// Üst banner arka plan rengi (mavi → mor)
+.page-header {
+  background-image: linear-gradient(135deg, #3b5cff, #7b4cff);
+  color: #ffffff;
+}
+
+// Başlık rengi
+.project-name,
+.project-tagline {
+  color: #ffffff;
+}
+
+// Logo ekleme (başlığın soluna)
+.project-name::before {
+  content: "";
+  display: inline-block;
+  background-image: url("/assets/images/logo.png");
+  background-size: contain;
+  background-repeat: no-repeat;
+  width: 52px;
+  height: 52px;
+  margin-right: 14px;
+  vertical-align: middle;
 }

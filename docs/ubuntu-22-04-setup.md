@@ -59,6 +59,7 @@ Cihazın flaşlanabilmesi için aşağıdaki adımlar takip edilerek Recovery Mo
     ```bash
     lsusb | grep -i "NVIDIA Corp"
     ```
+    
 ### 3.2. Dosya Sisteminin Hazırlanması
 
 Sürücülerin ve kök dosya sisteminin (rootfs) Host PC üzerinde yapılandırılması:
