@@ -1,0 +1,6 @@
+title: HU NeuRo-Lab
+description: ROS 2 Wheel Odometry Integration for OpenVINS
+theme: jekyll-theme-cayman
+show_downloads: false
+# Logo yolunu burada tanımlasak da CSS içinde çağırmamız gerekecek
+logo_path: /assets/images/neurolab_logo.png

@@ -194,7 +194,7 @@ void ROS2Visualizer::setup_subscribers(std::shared_ptr<ov_core::YamlParser> pars
         std::bind(&ROS2Visualizer::callback_wheel, this, std::placeholders::_1)
     );
 
-    PRINT_DEBUG("subscribing to wheel odom: %s\n", topic_wheel.c_str());
+    PRINT_INFO("subscribing to wheel odom: %s\n", topic_wheel.c_str());
   }else {
     PRINT_DEBUG("Wheel odometry not enabled, skipping subscription.\n");
   }
@@ -628,14 +628,6 @@ void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::Sha
                            msg->twist.twist.angular.y,
                            msg->twist.twist.angular.z;
 
-
-  for (int i = 0; i < 6; i++) {
-    for (int j = 0; j < 6; j++) {
-      data.covariance(i, j) = msg->twist.covariance[i * 6 + j];
-    }
-  }
-
-
   // --- DEBUG BAŞLANGIÇ ---
   PRINT_INFO(GREEN "[WHEEL-DATA] Time: %.4f | Lin: [%.2f %.2f %.2f] | Ang: [%.2f %.2f %.2f]\n" RESET,
              data.timestamp,
@@ -643,7 +635,7 @@ void ov_msckf::ROS2Visualizer::callback_wheel(const nav_msgs::msg::Odometry::Sha
              data.angular_velocity(0), data.angular_velocity(1), data.angular_velocity(2));
 
 
-  // _app->feed_measurement_wheel(data);
+  _app->feed_measurement_wheel(data);
 }
 
 void ROS2Visualizer::publish_state() {

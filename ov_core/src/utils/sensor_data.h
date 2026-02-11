@@ -92,8 +92,6 @@ struct OdometryData {
 
   Eigen::Matrix<double, 3, 1> angular_velocity;
 
-  Eigen::Matrix<double, 6, 6> covariance;
-
   bool operator<(const OdometryData &other) const { return timestamp < other.timestamp; }
 };
 
