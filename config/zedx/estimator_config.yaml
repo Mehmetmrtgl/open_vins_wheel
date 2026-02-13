@@ -13,7 +13,7 @@ calib_cam_timeoffset: false # if timeoffset between camera and IMU should be opt
 calib_imu_intrinsics: false # if imu intrinsics should be calibrated (rotation and skew-scale matrix)
 calib_imu_g_sensitivity: false # if gyroscope gravity sensitivity (Tg) should be calibrated
 
-wheel_odometry : false
+wheel_odometry : true
 wheel_calib_ext : false
 wheel_calib_int : false
 wheel_calib_dt : false

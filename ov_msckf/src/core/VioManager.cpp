@@ -205,7 +205,6 @@ void VioManager::feed_measurement_wheel(const ov_core::OdometryData &message) {
     if (updaterWheel != nullptr) {
         updaterWheel->feed_measurement(message, oldest_time);
     }
-
 }
 
 void VioManager::feed_measurement_simulation(double timestamp, const std::vector<int> &camids,
@@ -376,6 +375,14 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   }
   rT3 = boost::posix_time::microsec_clock::local_time();
 
+
+  if (is_initialized_vio && updaterWheel != nullptr) {
+      // Ana thread içindeyiz, State'e erişim güvenli.
+      updaterWheel->try_update();
+      
+      // Wheel update State'i değiştirdiği için cache'i geçersiz kılalım
+      propagator->invalidate_cache();
+  }
   // If we have not reached max clones, we should just return...
   // This isn't super ideal, but it keeps the logic after this easier...
   // We can start processing things when we have at least 5 clones since we can start triangulating things...
