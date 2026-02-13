@@ -11,15 +11,15 @@ using namespace Eigen;
 UpdaterWheel::UpdaterWheel(std::shared_ptr<State> state) : state(state) {
     PRINT_DEBUG("[WHEEL] Initializing UpdaterWheel...\n");
     last_updated_clone_time = -1.0;
-    
+
     // Initialize preintegrated values
     delta_p.setZero();
     delta_R.setIdentity();
     covariance.setZero();
-    
+
     // Default extrinsics (identity)
     T_imu_odom = Matrix4d::Identity();
-    
+
     // Default noise parameters
     noise_gyro = 0.2;  // rad/s
     noise_vel = 0.5;   // m/s
@@ -68,9 +68,9 @@ void UpdaterWheel::try_update() {
         if (it->first <= last_updated_clone_time) {
             continue;
         }
-        PRINT_DEBUG("[WHEEL] try_update: Attempting update [%.3f -> %.3f]\n", 
+        PRINT_DEBUG("[WHEEL] try_update: Attempting update [%.3f -> %.3f]\n",
                     last_updated_clone_time, it->first);
-        
+
         // Try to update between last_updated_clone_time and current clone
         if (!update(last_updated_clone_time, it->first)) {
             PRINT_DEBUG("[WHEEL] try_update: Update failed, stopping\n");
@@ -101,7 +101,7 @@ bool UpdaterWheel::update(double time0, double time1) {
         double dt = d2.timestamp - d1.timestamp;
         if (dt <= 1e-6) continue; // Skip very small time steps
 
-        preintegration_3D(dt, d1, d2);
+        preintegration_RK4(dt, d1, d2);
     }
 
     // Compute linear system (H matrix and residuals)
@@ -116,8 +116,8 @@ bool UpdaterWheel::update(double time0, double time1) {
 
     // Debug output
     PRINT_DEBUG("[WHEEL]: Update between %.3f and %.3f\n", time0, time1);
-    PRINT_DEBUG("[WHEEL]: H size: %d x %d, res size: %d, cov size: %d x %d\n", 
-                (int)H.rows(), (int)H.cols(), (int)res.size(), 
+    PRINT_DEBUG("[WHEEL]: H size: %d x %d, res size: %d, cov size: %d x %d\n",
+                (int)H.rows(), (int)H.cols(), (int)res.size(),
                 (int)covariance.rows(), (int)covariance.cols());
 
     // Perform EKF update
@@ -144,7 +144,7 @@ bool UpdaterWheel::select_odometry_data(double time0, double time1,
         return false;
     }
     PRINT_DEBUG("[WHEEL] select_odometry_data: Requested [%.3f, %.3f], buffer [%.3f, %.3f], size=%zu\n",
-                time0, time1, 
+                time0, time1,
                 odometry_data.front().timestamp, odometry_data.back().timestamp,
                 odometry_data.size());
 
@@ -187,7 +187,7 @@ bool UpdaterWheel::select_odometry_data(double time0, double time1,
             break;
         }
     }
-    
+
     PRINT_DEBUG("[WHEEL] select_odometry_data: %zu measurements selected\n", data_vec.size());
 
     return data_vec.size() >= 2;
@@ -232,37 +232,37 @@ void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, cons
     // Current state
     Matrix3d R0 = delta_R;
     Vector3d p0 = delta_p;
-    
+
     // k1 calculation (at t0)
     Vector3d w_k1 = w1_imu;
     Vector3d v_k1 = v1_imu;
     Matrix3d dR_k1 = R0 * exp_so3(w_k1 * dt);
     Vector3d dp_k1 = R0 * v_k1 * dt;
-    
+
     // k2 calculation (at t0 + dt/2)
     Vector3d w_k2 = 0.5 * (w1_imu + w2_imu);
     Vector3d v_k2 = 0.5 * (v1_imu + v2_imu);
     Matrix3d R_k2 = R0 * exp_so3(w_k1 * dt * 0.5);
     Matrix3d dR_k2 = R_k2 * exp_so3(w_k2 * dt);
     Vector3d dp_k2 = R_k2 * v_k2 * dt;
-    
+
     // k3 calculation (at t0 + dt/2, using k2 slope)
     Matrix3d R_k3 = R0 * exp_so3(w_k2 * dt * 0.5);
     Matrix3d dR_k3 = R_k3 * exp_so3(w_k2 * dt);
     Vector3d dp_k3 = R_k3 * v_k2 * dt;
-    
+
     // k4 calculation (at t0 + dt)
     Vector3d w_k4 = w2_imu;
     Vector3d v_k4 = v2_imu;
     Matrix3d R_k4 = R0 * exp_so3(w_k2 * dt);
     Matrix3d dR_k4 = R_k4 * exp_so3(w_k4 * dt);
     Vector3d dp_k4 = R_k4 * v_k4 * dt;
-    
+
     // Weighted average (RK4 formula)
     // For rotation: use composition on manifold
     Vector3d w_avg_rk4 = (w_k1 + 2.0*w_k2 + 2.0*w_k2 + w_k4) / 6.0;
     Matrix3d R_new = R0 * exp_so3(w_avg_rk4 * dt);
-    
+
     // For position: weighted average of increments
     Vector3d p_new = p0 + (dp_k1 + 2.0*dp_k2 + 2.0*dp_k3 + dp_k4) / 6.0;
 
@@ -270,10 +270,10 @@ void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, cons
     // Use the average angular velocity for Jacobian computation
     Vector3d w_avg = (w1_imu + w2_imu) * 0.5;
     Vector3d v_avg = (v1_imu + v2_imu) * 0.5;
-    
+
     // Compute Jacobians using average values
     Matrix3d dR_avg = exp_so3(w_avg * dt);
-    
+
     Matrix<double, 6, 6> F = Matrix<double, 6, 6>::Identity();
     F.block<3,3>(0,0) = dR_avg.transpose();
     F.block<3,3>(3,0) = -delta_R * skew_x(v_avg * dt);
@@ -299,7 +299,7 @@ void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, cons
     delta_p = p_new;
 
     PRINT_DEBUG("[WHEEL] preintegrate_RK4: dt=%.4f, delta_p=[%.3f,%.3f,%.3f], delta_R_norm=%.6f\n",
-                dt, delta_p(0), delta_p(1), delta_p(2), 
+                dt, delta_p(0), delta_p(1), delta_p(2),
                 log_so3(delta_R).norm());
 }
 
@@ -355,7 +355,7 @@ void UpdaterWheel::preintegration_3D(double dt, const OdometryData& data1, const
     delta_p = p_new;
 
     PRINT_DEBUG("[WHEEL] preintegrate: dt=%.4f, delta_p=[%.3f,%.3f,%.3f], delta_R_norm=%.6f\n",
-            dt, delta_p(0), delta_p(1), delta_p(2), 
+            dt, delta_p(0), delta_p(1), delta_p(2),
             log_so3(delta_R).norm());
 }
 
@@ -390,17 +390,17 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     // Compute expected relative transformation in odometry frame
     Matrix3d R_I0toI1 = R_GtoI1 * R_GtoI0.transpose();
     Matrix3d R_O0toO1_expected = R_ItoO * R_I0toI1 * R_ItoO.transpose();
-    
+
     Vector3d p_I1inI0 = R_GtoI0 * (p_I1inG - p_I0inG);
     Vector3d p_O1inO0_expected = R_ItoO * (p_I1inI0 + R_I0toI1 * p_OinI - p_OinI);
 
     // Compute residuals (measurement - estimate)
     res = VectorXd::Zero(6);
-    
+
     // Rotation residual: log(delta_R * R_expected^T)
     Matrix3d R_err = delta_R * R_O0toO1_expected.transpose();
     res.segment<3>(0) = log_so3(R_err);
-    
+
     // Position residual
     res.segment<3>(3) = delta_p - p_O1inO0_expected;
 
@@ -409,22 +409,22 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     // For PoseJPL: size() = 7 (4 quat + 3 pos)
     // We have 2 clones, so H should be 6 x 14
     // ============================================
-    
+
     // STEP 1: First create x_order (IMPORTANT: Do this BEFORE calculating H size)
     x_order.clear();
     x_order.push_back(clone0);
     x_order.push_back(clone1);
-    
+
     // STEP 2: Calculate total H columns from x_order
     int total_hx = 0;
     for (const auto& var : x_order) {
         total_hx += var->size();  // This will be 7 + 7 = 14
     }
-    
+
     PRINT_DEBUG("[WHEEL] Clone0: id=%d, size=%d\n", clone0->id(), clone0->size());
     PRINT_DEBUG("[WHEEL] Clone1: id=%d, size=%d\n", clone1->id(), clone1->size());
     PRINT_DEBUG("[WHEEL] Total H columns (from x_order): %d\n", total_hx);
-    
+
     // STEP 3: Create H matrix with CORRECT size
     H = MatrixXd::Zero(6, total_hx);  // Should be 6 x 14
 
@@ -447,45 +447,45 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     // IMPORTANT: PoseJPL internal state is [quat(4), pos(3)] = 7 elements
     // But on manifold it's [rotation(3), position(3)] = 6 dof
     // StateHelper::EKFUpdate uses size() which returns 7!
-    
+
     // Clone0 occupies first 7 columns (indices 0-6)
     // We fill the manifold Jacobian (6 dof) into these 7 columns
     // The 4th column (quaternion w component) remains zero
-    
+
     int clone0_size = clone0->size();  // Should be 7
     int clone1_size = clone1->size();  // Should be 7
-    
+
     // Clone0 Jacobians (columns 0-6, but only using first 6 dof)
     H.block<3,3>(0, 0) = H_rot_R0;  // Rotation residual wrt R0 (cols 0-2)
     H.block<3,3>(3, 0) = H_pos_R0;  // Position residual wrt R0 (cols 0-2)
     H.block<3,3>(3, 3) = H_pos_p0;  // Position residual wrt p0 (cols 3-5)
     // Column 6 (7th column) for quat w component stays zero
-    
+
     // Clone1 Jacobians (columns 7-13, but only using first 6 dof)
     int idx1 = clone0_size;  // Start at column 7
     H.block<3,3>(0, idx1+0) = H_rot_R1;  // Rotation residual wrt R1 (cols 7-9)
     H.block<3,3>(3, idx1+0) = H_pos_R1;  // Position residual wrt R1 (cols 7-9)
     H.block<3,3>(3, idx1+3) = H_pos_p1;  // Position residual wrt p1 (cols 10-12)
     // Column 13 (14th column) for quat w component stays zero
-    
+
     PRINT_DEBUG("[WHEEL] Residuals: rot_err=[%.4f,%.4f,%.4f] (norm=%.4f), pos_err=[%.4f,%.4f,%.4f] (norm=%.4f)\n",
                 res(0), res(1), res(2), res.segment<3>(0).norm(),
                 res(3), res(4), res(5), res.segment<3>(3).norm());
-    
+
     PRINT_DEBUG("[WHEEL] Covariance diagonal: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
                 covariance(0,0), covariance(1,1), covariance(2,2),
                 covariance(3,3), covariance(4,4), covariance(5,5));
-    
-    PRINT_DEBUG("[WHEEL] H matrix: %dx%d, condition_number=%.2e\n", 
-                (int)H.rows(), (int)H.cols(), 
+
+    PRINT_DEBUG("[WHEEL] H matrix: %dx%d, condition_number=%.2e\n",
+                (int)H.rows(), (int)H.cols(),
                 H.norm() / (H.completeOrthogonalDecomposition().pseudoInverse().norm() + 1e-10));
-    
+
     // Sanity checks
     assert(H.rows() == 6);
     assert(H.cols() == total_hx);
     assert(res.rows() == 6);
     assert(covariance.rows() == 6 && covariance.cols() == 6);
-    
+
     PRINT_DEBUG("[WHEEL] compute linear system complete - all checks passed\n");
 
     return true;
@@ -504,7 +504,7 @@ OdometryData UpdaterWheel::interpolate_data(const OdometryData& data1,
     interp.linear_velocity = (1.0 - lambda) * data1.linear_velocity + lambda * data2.linear_velocity;
     interp.angular_velocity = (1.0 - lambda) * data1.angular_velocity + lambda * data2.angular_velocity;
     PRINT_DEBUG("[WHEEL] interpolate_data \n");
-                                 
+
     return interp;
 }
 
@@ -548,13 +548,13 @@ Matrix3d UpdaterWheel::skew_x(const Vector3d& v) {
 
 Matrix3d UpdaterWheel::Jr_so3(const Vector3d& w) {
     double theta = w.norm();
-    
+
     if (theta < 1e-8) {
         return Matrix3d::Identity() - 0.5 * skew_x(w);
     }
-    
+
     Matrix3d W = skew_x(w);
-    return Matrix3d::Identity() 
+    return Matrix3d::Identity()
            - ((1.0 - cos(theta))/(theta*theta)) * W
            + ((theta - sin(theta))/(theta*theta*theta)) * W * W;
 }
@@ -562,13 +562,13 @@ Matrix3d UpdaterWheel::Jr_so3(const Vector3d& w) {
 
 Matrix3d UpdaterWheel::Jr_so3_inv(const Vector3d& w) {
     double theta = w.norm();
-    
+
     if (theta < 1e-8) {
         return Matrix3d::Identity() + 0.5 * skew_x(w);
     }
-    
+
     Matrix3d W = skew_x(w);
-    return Matrix3d::Identity() 
+    return Matrix3d::Identity()
            + 0.5 * W
            + (1.0/(theta*theta) - (1.0 + cos(theta))/(2.0*theta*sin(theta))) * W * W;
 }
@@ -577,7 +577,7 @@ Matrix3d UpdaterWheel::Jr_so3_inv(const Vector3d& w) {
 Vector4d UpdaterWheel::rot_2_quat(const Matrix3d& R) {
     Vector4d q;
     double T = R.trace();
-    
+
     if (T > 0) {
         double S = sqrt(T + 1.0) * 2.0;
         q(0) = (R(2,1) - R(1,2)) / S;
@@ -603,7 +603,7 @@ Vector4d UpdaterWheel::rot_2_quat(const Matrix3d& R) {
         q(2) = 0.25 * S;
         q(3) = (R(1,0) - R(0,1)) / S;
     }
-    
+
     return q / q.norm();
 }
 

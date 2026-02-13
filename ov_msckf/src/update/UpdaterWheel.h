@@ -34,7 +34,7 @@ public:
      * @param oldest_time Oldest clone time for cleaning old data
      */
     void feed_measurement(const ov_core::OdometryData& message, double oldest_time);
-    
+
     /**
      * @brief Try to update the state with available measurements
      */
@@ -82,8 +82,8 @@ private:
      * @param oldest_time Threshold time
      */
     void clean_old_measurements(double oldest_time);
-    
-    void preintegration_RK4(double dt, const OdometryData& data1, const OdometryData& data2);
+
+    void preintegration_RK4(double dt, const ov_core::OdometryData& data1, const ov_core::OdometryData& data2);
 
     // CHANGED: Explicitly use ov_core::OdometryData
     /**
@@ -118,7 +118,7 @@ private:
     ov_core::OdometryData interpolate_data(const ov_core::OdometryData& data1, const ov_core::OdometryData& data2, double timestamp);
 
     // ========== Utility functions ==========
-    
+
     /**
      * @brief Exponential map for SO(3)
      */
@@ -170,13 +170,13 @@ private:
     Eigen::Matrix4d Omega(const Eigen::Vector3d& w);
 
     // ========== Member variables ==========
-    
+
     /// Pointer to state
     std::shared_ptr<ov_msckf::State> state;
 
     /// Odometry data buffer
-    std::mutex odometry_data_mtx;          
-    std::vector<ov_core::OdometryData> odometry_data; 
+    std::mutex odometry_data_mtx;
+    std::vector<ov_core::OdometryData> odometry_data;
 
     /// Last updated clone time
     double last_updated_clone_time;
