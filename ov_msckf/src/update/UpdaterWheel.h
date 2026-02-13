@@ -82,6 +82,8 @@ private:
      * @param oldest_time Threshold time
      */
     void clean_old_measurements(double oldest_time);
+    
+    void preintegration_RK4(double dt, const OdometryData& data1, const OdometryData& data2);
 
     // CHANGED: Explicitly use ov_core::OdometryData
     /**

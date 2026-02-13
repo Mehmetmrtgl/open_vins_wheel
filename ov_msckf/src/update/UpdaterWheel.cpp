@@ -31,6 +31,11 @@ void UpdaterWheel::feed_measurement(const OdometryData& message, double oldest_t
     std::lock_guard<std::mutex> lck(odometry_data_mtx);
     odometry_data.push_back(message);
     PRINT_DEBUG("[WHEEL] ODOMETRY DATA PUSHLANDI \n");
+    PRINT_DEBUG("[WHEEL] Feed: t=%.3f, lin=[%.3f,%.3f,%.3f], ang=[%.3f,%.3f,%.3f], buffer_size=%zu\n",
+                message.timestamp,
+                message.linear_velocity(0), message.linear_velocity(1), message.linear_velocity(2),
+                message.angular_velocity(0), message.angular_velocity(1), message.angular_velocity(2),
+                odometry_data.size());
 
     clean_old_measurements(oldest_time);
 }
@@ -39,12 +44,15 @@ void UpdaterWheel::feed_measurement(const OdometryData& message, double oldest_t
 void UpdaterWheel::try_update() {
     // Check if we have valid clone times
     if (state->_clones_IMU.empty()) {
+        PRINT_DEBUG("[WHEEL] try_update: No clones available\n");
         return;
     }
 
     // Get the oldest and newest clone times
     double oldest_time = state->_clones_IMU.begin()->first;
     double newest_time = state->_clones_IMU.rbegin()->first;
+    PRINT_DEBUG("[WHEEL] try_update: clones [%.3f to %.3f], last_updated=%.3f, num_clones=%zu\n",
+                oldest_time, newest_time, last_updated_clone_time, state->_clones_IMU.size());
 
     // Check last updated clone time still exists in the state
     if (last_updated_clone_time < 0 ||
@@ -60,9 +68,12 @@ void UpdaterWheel::try_update() {
         if (it->first <= last_updated_clone_time) {
             continue;
         }
-
+        PRINT_DEBUG("[WHEEL] try_update: Attempting update [%.3f -> %.3f]\n", 
+                    last_updated_clone_time, it->first);
+        
         // Try to update between last_updated_clone_time and current clone
         if (!update(last_updated_clone_time, it->first)) {
+            PRINT_DEBUG("[WHEEL] try_update: Update failed, stopping\n");
             break; // Stop if update fails
         }
     }
@@ -123,13 +134,19 @@ bool UpdaterWheel::select_odometry_data(double time0, double time1,
     std::lock_guard<std::mutex> lck(odometry_data_mtx);
 
     if (odometry_data.empty() || time1 <= time0) {
+        PRINT_DEBUG("[WHEEL] select_odometry_data: Buffer is empty\n");
         return false;
     }
 
     // Check if we have data covering the time range
     if (odometry_data.back().timestamp < time1 || odometry_data.front().timestamp > time0) {
+        PRINT_DEBUG("[WHEEL] select_odometry_data: Invalid time range [%.3f, %.3f]\n", time0, time1);
         return false;
     }
+    PRINT_DEBUG("[WHEEL] select_odometry_data: Requested [%.3f, %.3f], buffer [%.3f, %.3f], size=%zu\n",
+                time0, time1, 
+                odometry_data.front().timestamp, odometry_data.back().timestamp,
+                odometry_data.size());
 
     // Find measurements within the time range
     bool found_start = false;
@@ -144,6 +161,7 @@ bool UpdaterWheel::select_odometry_data(double time0, double time1,
                 OdometryData interp = interpolate_data(curr, next, time0);
                 data_vec.push_back(interp);
                 found_start = true;
+                PRINT_DEBUG("[WHEEL] select_odometry_data: Interpolated start at %.3f\n", time0);
                 continue;
             }
         }
@@ -159,6 +177,7 @@ bool UpdaterWheel::select_odometry_data(double time0, double time1,
             if (next.timestamp >= time1 && curr.timestamp < time1) {
                 OdometryData interp = interpolate_data(curr, next, time1);
                 data_vec.push_back(interp);
+                PRINT_DEBUG("[WHEEL] select_odometry_data: Interpolated end at %.3f\n", time1);
                 break;
             }
         }
@@ -192,6 +211,97 @@ void UpdaterWheel::clean_old_measurements(double oldest_time) {
     }
 }
 
+void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, const OdometryData& data2) {
+    // Get angular and linear velocities from odometry
+    Vector3d w1 = data1.angular_velocity;
+    Vector3d v1 = data1.linear_velocity;
+    Vector3d w2 = data2.angular_velocity;
+    Vector3d v2 = data2.linear_velocity;
+
+    // Transform velocities from odometry frame to IMU frame using extrinsics
+    Matrix3d R_ItoO = T_imu_odom.block<3,3>(0,0);
+    Vector3d p_IinO = T_imu_odom.block<3,1>(0,3);
+
+    // Transform to IMU frame
+    Vector3d w1_imu = R_ItoO.transpose() * w1;
+    Vector3d v1_imu = R_ItoO.transpose() * (v1 - w1.cross(p_IinO));
+    Vector3d w2_imu = R_ItoO.transpose() * w2;
+    Vector3d v2_imu = R_ItoO.transpose() * (v2 - w2.cross(p_IinO));
+
+    // ============ RK4 Integration ============
+    // Current state
+    Matrix3d R0 = delta_R;
+    Vector3d p0 = delta_p;
+    
+    // k1 calculation (at t0)
+    Vector3d w_k1 = w1_imu;
+    Vector3d v_k1 = v1_imu;
+    Matrix3d dR_k1 = R0 * exp_so3(w_k1 * dt);
+    Vector3d dp_k1 = R0 * v_k1 * dt;
+    
+    // k2 calculation (at t0 + dt/2)
+    Vector3d w_k2 = 0.5 * (w1_imu + w2_imu);
+    Vector3d v_k2 = 0.5 * (v1_imu + v2_imu);
+    Matrix3d R_k2 = R0 * exp_so3(w_k1 * dt * 0.5);
+    Matrix3d dR_k2 = R_k2 * exp_so3(w_k2 * dt);
+    Vector3d dp_k2 = R_k2 * v_k2 * dt;
+    
+    // k3 calculation (at t0 + dt/2, using k2 slope)
+    Matrix3d R_k3 = R0 * exp_so3(w_k2 * dt * 0.5);
+    Matrix3d dR_k3 = R_k3 * exp_so3(w_k2 * dt);
+    Vector3d dp_k3 = R_k3 * v_k2 * dt;
+    
+    // k4 calculation (at t0 + dt)
+    Vector3d w_k4 = w2_imu;
+    Vector3d v_k4 = v2_imu;
+    Matrix3d R_k4 = R0 * exp_so3(w_k2 * dt);
+    Matrix3d dR_k4 = R_k4 * exp_so3(w_k4 * dt);
+    Vector3d dp_k4 = R_k4 * v_k4 * dt;
+    
+    // Weighted average (RK4 formula)
+    // For rotation: use composition on manifold
+    Vector3d w_avg_rk4 = (w_k1 + 2.0*w_k2 + 2.0*w_k2 + w_k4) / 6.0;
+    Matrix3d R_new = R0 * exp_so3(w_avg_rk4 * dt);
+    
+    // For position: weighted average of increments
+    Vector3d p_new = p0 + (dp_k1 + 2.0*dp_k2 + 2.0*dp_k3 + dp_k4) / 6.0;
+
+    // ============ Covariance Propagation ============
+    // Use the average angular velocity for Jacobian computation
+    Vector3d w_avg = (w1_imu + w2_imu) * 0.5;
+    Vector3d v_avg = (v1_imu + v2_imu) * 0.5;
+    
+    // Compute Jacobians using average values
+    Matrix3d dR_avg = exp_so3(w_avg * dt);
+    
+    Matrix<double, 6, 6> F = Matrix<double, 6, 6>::Identity();
+    F.block<3,3>(0,0) = dR_avg.transpose();
+    F.block<3,3>(3,0) = -delta_R * skew_x(v_avg * dt);
+
+    // Noise Jacobian
+    Matrix<double, 6, 6> G = Matrix<double, 6, 6>::Zero();
+    G.block<3,3>(0,0) = delta_R * dt;
+    G.block<3,3>(3,3) = delta_R * dt;
+
+    // Process noise covariance
+    Matrix<double, 6, 6> Q = Matrix<double, 6, 6>::Zero();
+    Q.block<3,3>(0,0) = (noise_gyro * noise_gyro / dt) * Matrix3d::Identity();
+    Q.block<3,3>(3,3) = (noise_vel * noise_vel / dt) * Matrix3d::Identity();
+
+    // Propagate covariance
+    covariance = F * covariance * F.transpose() + G * Q * G.transpose();
+
+    // Ensure symmetry
+    covariance = 0.5 * (covariance + covariance.transpose());
+
+    // Update preintegrated values
+    delta_R = R_new;
+    delta_p = p_new;
+
+    PRINT_DEBUG("[WHEEL] preintegrate_RK4: dt=%.4f, delta_p=[%.3f,%.3f,%.3f], delta_R_norm=%.6f\n",
+                dt, delta_p(0), delta_p(1), delta_p(2), 
+                log_so3(delta_R).norm());
+}
 
 void UpdaterWheel::preintegration_3D(double dt, const OdometryData& data1, const OdometryData& data2) {
     // Get angular and linear velocities from odometry
@@ -244,7 +354,9 @@ void UpdaterWheel::preintegration_3D(double dt, const OdometryData& data1, const
     delta_R = R_new;
     delta_p = p_new;
 
-    PRINT_DEBUG("[WHEEL] preintegrate \n");
+    PRINT_DEBUG("[WHEEL] preintegrate: dt=%.4f, delta_p=[%.3f,%.3f,%.3f], delta_R_norm=%.6f\n",
+            dt, delta_p(0), delta_p(1), delta_p(2), 
+            log_so3(delta_R).norm());
 }
 
 
@@ -356,8 +468,17 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     H.block<3,3>(3, idx1+3) = H_pos_p1;  // Position residual wrt p1 (cols 10-12)
     // Column 13 (14th column) for quat w component stays zero
     
-    PRINT_DEBUG("[WHEEL] H matrix filled: %d x %d\n", (int)H.rows(), (int)H.cols());
-    PRINT_DEBUG("[WHEEL] Residual norm: %.6f\n", res.norm());
+    PRINT_DEBUG("[WHEEL] Residuals: rot_err=[%.4f,%.4f,%.4f] (norm=%.4f), pos_err=[%.4f,%.4f,%.4f] (norm=%.4f)\n",
+                res(0), res(1), res(2), res.segment<3>(0).norm(),
+                res(3), res(4), res(5), res.segment<3>(3).norm());
+    
+    PRINT_DEBUG("[WHEEL] Covariance diagonal: [%.6f, %.6f, %.6f, %.6f, %.6f, %.6f]\n",
+                covariance(0,0), covariance(1,1), covariance(2,2),
+                covariance(3,3), covariance(4,4), covariance(5,5));
+    
+    PRINT_DEBUG("[WHEEL] H matrix: %dx%d, condition_number=%.2e\n", 
+                (int)H.rows(), (int)H.cols(), 
+                H.norm() / (H.completeOrthogonalDecomposition().pseudoInverse().norm() + 1e-10));
     
     // Sanity checks
     assert(H.rows() == 6);
