@@ -164,7 +164,11 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
 
   if (params.state_options.do_wheel_odometry) {
     updaterWheel = std::make_shared<UpdaterWheel>(state);
-    PRINT_INFO("UpdaterWheel initialized!\n");
+    updaterWheel->set_extrinsics(params.wheel_options.T_imu_wheel);
+    updaterWheel->set_noise(params.wheel_options.noise_w, params.wheel_options.noise_v);
+    PRINT_INFO("UpdaterWheel initialized! noise_w=%.4f, noise_v=%.4f, p_IinO=[%.3f, %.3f, %.3f]\n",
+               params.wheel_options.noise_w, params.wheel_options.noise_v,
+               params.wheel_options.T_imu_wheel(0,3), params.wheel_options.T_imu_wheel(1,3), params.wheel_options.T_imu_wheel(2,3));
   }
 
 }
@@ -379,7 +383,7 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   if (is_initialized_vio && updaterWheel != nullptr) {
       // Ana thread içindeyiz, State'e erişim güvenli.
       updaterWheel->try_update();
-      
+
       // Wheel update State'i değiştirdiği için cache'i geçersiz kılalım
       propagator->invalidate_cache();
   }
@@ -707,6 +711,7 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // 'updaterSLAM->delayed_init(state, feats_slam_DELAYED);': Bu, bloğun ana işlemidir 🚀. 'feats_slam_DELAYED' listesindeki (yani VIO'dan yeni terfi etmiş ve henüz 'state'de olmayan) *yeni* özellikleri alır.
   // Bu fonksiyon, bu özellikleri (geçmiş pozları kullanarak) üçgenleştirmeye (triangulate) çalışır ve başarılı olursa, EKF durumunu ('state') bu yeni 3D landmark'ları içerecek şekilde *genişletir* (augment).
   // 'rT6 = ...': Yeni özelliklerin bu "gecikmeli başlatma" (delayed initialization) işleminin bittiği anı zamanlama için kaydeder.
+
 
   //===================================================================================
   // Update our visualization feature set, and clean up the old features

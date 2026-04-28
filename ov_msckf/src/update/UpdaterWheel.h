@@ -40,6 +40,9 @@ public:
      */
     void try_update();
 
+    /// Whether the system is currently in pure-rotation mode
+    bool is_pure_rotation() const { return last_was_pure_rotation; }
+
     /**
      * @brief Set extrinsic calibration (IMU to Odometry frame)
      * @param T_imu_odom 4x4 transformation matrix
@@ -56,6 +59,7 @@ public:
     void set_noise(double gyro_noise, double vel_noise) {
         noise_gyro = gyro_noise;
         noise_vel = vel_noise;
+        PRINT_INFO("[WHEEL] Noise params SET: gyro=%.4f, vel=%.4f\n", noise_gyro, noise_vel);
     }
 
 private:
@@ -187,11 +191,17 @@ private:
     Eigen::Matrix<double, 6, 6> covariance;
 
     /// Extrinsic calibration (IMU to Odometry)
-    Eigen::Matrix4d T_imu_odom;
+    Eigen::Matrix4d T_imu_odom = Eigen::Matrix4d::Identity();
 
     /// Noise parameters
-    double noise_gyro;
-    double noise_vel;
+    double noise_gyro = 0.2;
+    double noise_vel = 0.5;
+
+    /// Pure rotation detection parameters
+    double zvl_rotation_threshold = 0.1;   ///< min angular velocity to trigger (rad/s)
+    double zvl_velocity_ratio = 0.05;      ///< max v/w ratio to be considered pure rotation (m/rad)
+    bool last_was_pure_rotation = false;   ///< whether last check detected pure rotation
+
 };
 
 } // namespace ov_msckf
