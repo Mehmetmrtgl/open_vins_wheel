@@ -33,6 +33,7 @@
 
 #include "VioManagerOptions.h"
 #include "update/UpdaterWheel.h"
+#include "update/UpdaterMSCKF_Corr.h"
 
 namespace ov_core {
 struct ImuData;
@@ -48,7 +49,8 @@ namespace ov_msckf {
 
 class State;
 class StateHelper;
-class UpdaterMSCKF;
+//class UpdaterMSCKF;
+class UpdaterMSCKF_Corr;
 class UpdaterSLAM;
 class UpdaterZeroVelocity;
 class Propagator;
@@ -206,11 +208,11 @@ protected:
   bool is_initialized_vio = false;
 
   /// Our MSCKF feature updater
-  std::shared_ptr<UpdaterMSCKF> updaterMSCKF;
+  /// std::shared_ptr<UpdaterMSCKF> updaterMSCKF;
 
   /// Our SLAM/ARUCO feature updater
   std::shared_ptr<UpdaterSLAM> updaterSLAM;
-
+  std::shared_ptr<UpdaterMSCKF_Corr> updaterMSCKF;
   /// Our zero velocity tracker
   std::shared_ptr<UpdaterZeroVelocity> updaterZUPT;
 
