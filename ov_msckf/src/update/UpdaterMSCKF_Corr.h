@@ -72,7 +72,7 @@ private:
     // ---------- Correntropy parametreleri ----------
     int    N_window  = 75;
     int    W_recent  = 5;
-    double sigma_cam = 5.0;
+    double sigma_cam = 10.0;
 
     /// Kayan pencere — feature başına normalize inovasyon büyüklükleri
     std::deque<Eigen::VectorXd> past_innov;

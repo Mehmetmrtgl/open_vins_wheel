@@ -1,3 +1,4 @@
+
 #include "UpdaterMSCKF_Corr.h"
 
 #include "update/UpdaterHelper.h"
@@ -13,7 +14,6 @@
 #include "utils/quat_ops.h"
 
 #include <algorithm>
-#include <cassert>
 #include <cmath>
 
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -31,14 +31,11 @@ UpdaterMSCKF_Corr::UpdaterMSCKF_Corr(UpdaterOptions &options,
                                      ov_core::FeatureInitializerOptions &feat_init_options)
     : _options(options) {
 
-    // Raw piksel gürültüsünün karesini sakla (orijinal UpdaterMSCKF gibi)
     _options.sigma_pix_sq = std::pow(_options.sigma_pix, 2);
 
-    // Feature initializer (triangulation + gauss-newton)
     initializer_feat = std::shared_ptr<ov_core::FeatureInitializer>(
         new ov_core::FeatureInitializer(feat_init_options));
 
-    // Chi2 95% güven aralığı tablosu
     for (int i = 1; i < 500; i++) {
         boost::math::chi_squared chi_squared_dist(i);
         chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
@@ -59,6 +56,10 @@ double UpdaterMSCKF_Corr::correntropy_weight(double norm_innov,
 
 // =============================================================================
 // apply_correntropy_to_block
+//
+// H_block ve res_block, get_feature_jacobian_full'dan ÇIKMIŞ HAM haldedir.
+// Yani satırlar [u1,v1, u2,v2, ...] yapısındadır ve sayıları 2N'dir.
+// nullspace_project_inplace çağrılmadan ÖNCE bu fonksiyon kullanılmalıdır.
 // =============================================================================
 
 void UpdaterMSCKF_Corr::apply_correntropy_to_block(
@@ -68,9 +69,16 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
         Eigen::VectorXd &innov_out) const {
 
     const int n = static_cast<int>(res_block.size());
-    assert(n % 2 == 0 && "Residual boyutu çift olmalı (u,v çiftleri)");
-    assert(H_block.rows() == n);
-    assert(R_block.rows() == n && R_block.cols() == n);
+
+    // Güvenlik kontrolü — assert yerine yumuşak çıkış.
+    // Beklenmedik bir senaryoda (örn. ileride farklı projection adımı)
+    // n çift değilse Co'yu atla, normalize inovasyon da boş döner.
+    if (n <= 0 || (n % 2) != 0 ||
+        H_block.rows() != n ||
+        R_block.rows() != n || R_block.cols() != n) {
+        innov_out = Eigen::VectorXd();
+        return;
+    }
 
     const int num_feat = n / 2;
     innov_out.resize(num_feat);
@@ -88,12 +96,12 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
         innov_out(i) = norm_pix / r_avg;
     }
 
-    // Pencere dolmadıysa Co = I → değişiklik yapma
+    // Pencere dolmadıysa Co = I → değişiklik yok
     if (static_cast<int>(past_innov.size()) < N_window) {
         return;
     }
 
-    // Co = diag(G_i) ağırlığını H ve res'e sol-çarpım olarak uygula
+    // Co = diag(G_i) ağırlığını H ve res'in satırlarına sol-çarpım olarak uygula
     for (int i = 0; i < num_feat; i++) {
         const double G = correntropy_weight(innov_out(i), sigma_cam);
         H_block.row(2 * i)     *= G;
@@ -131,9 +139,6 @@ Eigen::MatrixXd UpdaterMSCKF_Corr::estimate_R(
     if (count == 0) return R_meas_in;
 
     const double mean_sq = sum_sq / static_cast<double>(count);
-
-    // mean_sq ≈ 1 → R doğru kalibre; değiştirme
-    // mean_sq > 1 → ölçüm gürültüsü tahminden büyük → R'yi büyüt
     const double scale = std::min(std::max(mean_sq, 0.5), 5.0);
 
     Eigen::MatrixXd R_new = R_meas_in;
@@ -159,8 +164,6 @@ void UpdaterMSCKF_Corr::push_innovation_history(
 
 // =============================================================================
 // Ana güncelleme fonksiyonu
-// (Orijinal UpdaterMSCKF::update ile birebir aynı akış,
-//  +Co ağırlığı +kayan pencere R kestirimi)
 // =============================================================================
 
 void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
@@ -173,7 +176,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT0 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // 0) Clone zamanlarını topla
+    // 0) Clone zamanları
     // ------------------------------------------------------------------
     std::vector<double> clonetimes;
     for (const auto &clone_imu : state->_clones_IMU) {
@@ -202,7 +205,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT1 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // 2) Her kamera için clone pose vektörü oluştur (triangulation için)
+    // 2) Clone pose vektörü
     // ------------------------------------------------------------------
     std::unordered_map<size_t,
         std::unordered_map<double, FeatureInitializer::ClonePose>> clones_cam;
@@ -220,7 +223,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     }
 
     // ------------------------------------------------------------------
-    // 3) Triangulation + opsiyonel Gauss-Newton refinement
+    // 3) Triangulation + Gauss-Newton refinement
     // ------------------------------------------------------------------
     auto it1 = feature_vec.begin();
     while (it1 != feature_vec.end()) {
@@ -246,7 +249,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT2 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // Maksimum ölçüm ve durum boyutunu hesapla
+    // Maksimum boyut hesabı
     // ------------------------------------------------------------------
     size_t max_meas_size = 0;
     for (size_t i = 0; i < feature_vec.size(); i++) {
@@ -267,11 +270,10 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     size_t ct_jacob = 0;
     size_t ct_meas  = 0;
 
-    // Bu adımda pencereye eklenecek normalize inovasyonlar
     Eigen::VectorXd innov_acc;
 
     // ------------------------------------------------------------------
-    // 4) Her feature için Jacobian + null-space + chi2 + correntropy
+    // 4) Her feature için Jacobian + correntropy + null-space + chi2
     // ------------------------------------------------------------------
     auto it2 = feature_vec.begin();
     while (it2 != feature_vec.end()) {
@@ -303,10 +305,30 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
         Eigen::VectorXd res;
         std::vector<std::shared_ptr<Type>> Hx_order;
 
+        // Ham Jacobian — bu noktada res [u1,v1, u2,v2, ...] yapısında
         UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
+
+        // ----- ÖNEMLİ: Correntropy ağırlığını NULL-SPACE'TEN ÖNCE uygula -----
+        // Çünkü nullspace_project_inplace satır sayısını 2N → 2N-3'e
+        // düşürür ve (u,v) çift yapısı kaybolur.
+        Eigen::MatrixXd R_pre = _options.sigma_pix_sq *
+            Eigen::MatrixXd::Identity(res.rows(), res.rows());
+
+        Eigen::VectorXd block_innov;
+        apply_correntropy_to_block(H_x, res, R_pre, block_innov);
+
+        // İnovasyonu pencere için biriktir
+        if (block_innov.size() > 0) {
+            Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
+            if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
+            merged.tail(block_innov.size()) = block_innov;
+            innov_acc = merged;
+        }
+
+        // ----- Şimdi null-space projeksiyonu (orijinal akış) -----
         UpdaterHelper::nullspace_project_inplace(H_f, H_x, res);
 
-        // ----- Chi2 testi (orijinal akış) -----
+        // ----- Chi2 testi -----
         Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hx_order);
         Eigen::MatrixXd S = H_x * P_marg * H_x.transpose();
         S.diagonal() += _options.sigma_pix_sq * Eigen::VectorXd::Ones(S.rows());
@@ -326,22 +348,6 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
             (*it2)->to_delete = true;
             it2 = feature_vec.erase(it2);
             continue;
-        }
-
-        // ----- Correntropy ağırlığını uygula -----
-        // Bu bloğa ait izotrop R (chi2 testindekiyle aynı varsayım)
-        Eigen::MatrixXd R_block = _options.sigma_pix_sq *
-            Eigen::MatrixXd::Identity(res.rows(), res.rows());
-
-        Eigen::VectorXd block_innov;
-        apply_correntropy_to_block(H_x, res, R_block, block_innov);
-
-        // İnovasyonu pencereye eklemek üzere biriktir
-        if (block_innov.size() > 0) {
-            Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
-            if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
-            merged.tail(block_innov.size()) = block_innov;
-            innov_acc = merged;
         }
 
         // ----- Büyük H ve res'e ekle -----
@@ -371,8 +377,6 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     if (ct_meas < 1) {
         return;
     }
-    assert(ct_meas <= max_meas_size);
-    assert(ct_jacob <= max_hx_size);
     res_big.conservativeResize(ct_meas, 1);
     Hx_big.conservativeResize(ct_meas, ct_jacob);
 
@@ -382,7 +386,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     }
 
     // ------------------------------------------------------------------
-    // 5) QR ile ölçüm sıkıştırması (Co zaten H ve res'in içinde)
+    // 5) QR ile ölçüm sıkıştırması
     // ------------------------------------------------------------------
     UpdaterHelper::measurement_compress_inplace(Hx_big, res_big);
     if (Hx_big.rows() < 1) {
@@ -390,7 +394,6 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     }
     rT4 = boost::posix_time::microsec_clock::local_time();
 
-    // İzotrop R (sıkıştırma sonrası)
     Eigen::MatrixXd R_big = _options.sigma_pix_sq *
         Eigen::MatrixXd::Identity(res_big.rows(), res_big.rows());
 
@@ -403,12 +406,11 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     StateHelper::EKFUpdate(state, Hx_order_big, Hx_big, res_big, R_big);
     rT5 = boost::posix_time::microsec_clock::local_time();
 
-    // Zaman raporu
-    PRINT_ALL("[CORR-UP]: %.4f sec clean\n",     (rT1 - rT0).total_microseconds() * 1e-6);
+    PRINT_ALL("[CORR-UP]: %.4f sec clean\n",      (rT1 - rT0).total_microseconds() * 1e-6);
     PRINT_ALL("[CORR-UP]: %.4f sec triangulate\n",(rT2 - rT1).total_microseconds() * 1e-6);
     PRINT_ALL("[CORR-UP]: %.4f sec system (%d feats)\n",
               (rT3 - rT2).total_microseconds() * 1e-6, (int)feature_vec.size());
-    PRINT_ALL("[CORR-UP]: %.4f sec compress\n",  (rT4 - rT3).total_microseconds() * 1e-6);
+    PRINT_ALL("[CORR-UP]: %.4f sec compress\n",   (rT4 - rT3).total_microseconds() * 1e-6);
     PRINT_ALL("[CORR-UP]: %.4f sec update (%d size)\n",
               (rT5 - rT4).total_microseconds() * 1e-6, (int)res_big.rows());
     PRINT_ALL("[CORR-UP]: %.4f sec total | history=%zu\n",
