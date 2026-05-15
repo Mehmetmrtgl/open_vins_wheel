@@ -87,6 +87,7 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterMSCKF.cpp
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterZeroVelocity.cpp
+        src/update/UpdaterWheel.cpp
 )
 if (catkin_FOUND AND ENABLE_ROS)
     list(APPEND LIBRARY_SOURCES src/ros/ROS1Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)

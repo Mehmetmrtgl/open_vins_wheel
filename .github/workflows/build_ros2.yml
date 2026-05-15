@@ -27,7 +27,7 @@ jobs:
       # THIS SEEMS TO FAIL WITH 245 ERROR, NOT SURE WHY!!!!!
       #- name: Run OpenVINS Simulation!
       #  run: |
-      #    docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
+      #    docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins_wheel/config/rpng_sim/estimator_config.yaml"
   build_2004:
     name: "ROS2 Ubuntu 20.04"
     runs-on: ubuntu-latest
@@ -48,7 +48,7 @@ jobs:
           docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && colcon build"
       - name: Run OpenVINS Simulation!
         run: |
-          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
+          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins_wheel/config/rpng_sim/estimator_config.yaml"
   build_2204:
     name: "ROS2 Ubuntu 22.04"
     runs-on: ubuntu-latest
@@ -69,4 +69,4 @@ jobs:
           docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && colcon build"
 #      - name: Run OpenVINS Simulation!
 #        run: |
-#          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins/config/rpng_sim/estimator_config.yaml"
+#          docker run -t --mount type=bind,source=$GITHUB_WORKSPACE,target=/catkin_ws openvins /bin/bash -c "cd /catkin_ws && source install/setup.bash && ros2 run ov_msckf run_simulation src/open_vins_wheel/config/rpng_sim/estimator_config.yaml"
