@@ -1,8 +1,37 @@
-# OpenVINS
+# OpenVINS + Wheel Odometry (open_vins_wheel)
 
-[![ROS 1 Workflow](https://github.com/rpng/open_vins/actions/workflows/build_ros1.yml/badge.svg)](https://github.com/rpng/open_vins/actions/workflows/build_ros1.yml)
-[![ROS 2 Workflow](https://github.com/rpng/open_vins/actions/workflows/build_ros2.yml/badge.svg)](https://github.com/rpng/open_vins/actions/workflows/build_ros2.yml)
-[![ROS Free Workflow](https://github.com/rpng/open_vins/actions/workflows/build.yml/badge.svg)](https://github.com/rpng/open_vins/actions/workflows/build.yml)
+[![ROS 1 Workflow](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build_ros1.yml/badge.svg)](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build_ros1.yml)
+[![ROS 2 Workflow](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build_ros2.yml/badge.svg)](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build_ros2.yml)
+[![ROS Free Workflow](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build.yml/badge.svg)](https://github.com/Mehmetmrtgl/open_vins_wheel/actions/workflows/build.yml)
+
+## About this Fork
+
+This repository extends [OpenVINS](https://github.com/rpng/open_vins) with a **wheel odometry updater** for ground robots.
+It fuses wheel encoder measurements into the EKF state via preintegration (RK4), enabling more robust localization in environments with poor visual texture or aggressive IMU excitation.
+
+### What's added
+
+- `UpdaterWheel` — EKF update step that preintegrates wheel odometry between clone times using RK4 and computes a linear measurement model (position + orientation residual)
+- `OptionsWheel` — configuration struct for wheel noise, extrinsic calibration (`T_imu_wheel`), and ROS topic
+- Pure-rotation detection — suppresses velocity updates when the platform is rotating in place
+- Ready-to-use configs for **ZED 2i**, **ZED X**, and **KAIST Urban** datasets (`config/zed2i/`, `config/zedx/`, `config/kaist/`)
+
+### Quick start (ROS 2)
+
+1. Set `wheel_odometry: true` in your `estimator_config.yaml`. Set `wheel_calib_ext: true` if you want to online-calibrate the IMU-to-wheel transform.
+2. Place a `wheel_config.yaml` next to your `estimator_config.yaml`. Ready-made examples are in `config/zed2i/` and `config/zedx/`. Set the `topic` field to your odometry topic, `noise_v`/`noise_w` to your encoder noise levels, and `T_imu_wheel` to the 4×4 rigid-body transform from the IMU frame to the wheel odometry frame.
+3. Launch as usual with `ros2 launch ov_msckf subscribe.launch.py`.
+
+### Tuning tips
+
+| Parameter | Effect |
+|---|---|
+| `noise_v` / `noise_w` | Higher → trust wheel less. Start around `0.05`; increase if wheel slip is expected |
+| `chi2_mult` | Chi-squared gate multiplier. Increase to be more permissive with outliers |
+| `T_imu_wheel` | Must match physical mounting. Rotation part is critical — use Kalibr or manual measurement |
+| `wheel_calib_ext` | Online extrinsic calibration; needs sufficient motion excitation to converge |
+
+---
 
 Welcome to the OpenVINS project!
 The OpenVINS project houses some core computer vision code along with a state-of-the art filter-based visual-inertial

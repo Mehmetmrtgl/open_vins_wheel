@@ -2,7 +2,7 @@ name: ROS Free Workflow
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, feature/** ]
   pull_request:
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Installing Ceres Solver
         run: |
           sudo apt-get update -y

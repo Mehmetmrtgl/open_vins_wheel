@@ -10,8 +10,8 @@ struct OptionsWheel {
 
     std::string topic = "/wheel_odom";
 
-    double noise_v = 0.1; // Lineer hız gürültüsü
-    double noise_w = 0.1; // Açısal hız gürültüsü
+    double noise_v = 0.1; // Linear velocity noise (m/s)
+    double noise_w = 0.1; // Angular velocity noise (rad/s)
 
     double chi2_mult = 1.0;
 

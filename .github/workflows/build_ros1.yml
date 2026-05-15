@@ -2,7 +2,7 @@ name: ROS 1 Workflow
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, feature/** ]
   pull_request:
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Create Workspace and Docker Image
         run: |
           export REPO=$(basename $GITHUB_REPOSITORY) &&
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Create Workspace and Docker Image
         run: |
           export REPO=$(basename $GITHUB_REPOSITORY) &&
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Code Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
       - name: Create Workspace and Docker Image
         run: |
           export REPO=$(basename $GITHUB_REPOSITORY) &&
