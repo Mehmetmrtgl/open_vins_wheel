@@ -41,7 +41,7 @@ UpdaterMSCKF_Corr::UpdaterMSCKF_Corr(UpdaterOptions &options,
         chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
     }
 
-    PRINT_DEBUG("[CorrUpdater] başlatıldı | N=%d  W=%d  sigma=%.2f\n",
+    PRINT_DEBUG("[CorrUpdater] initialized | N=%d  W=%d  sigma=%.2f\n",
                 N_window, W_recent, sigma_cam);
 }
 
@@ -57,9 +57,9 @@ double UpdaterMSCKF_Corr::correntropy_weight(double norm_innov,
 // =============================================================================
 // apply_correntropy_to_block
 //
-// H_block ve res_block, get_feature_jacobian_full'dan ÇIKMIŞ HAM haldedir.
-// Yani satırlar [u1,v1, u2,v2, ...] yapısındadır ve sayıları 2N'dir.
-// nullspace_project_inplace çağrılmadan ÖNCE bu fonksiyon kullanılmalıdır.
+// H_block and res_block are the raw outputs of get_feature_jacobian_full.
+// Rows are laid out as [u1,v1, u2,v2, ...], so the count is always 2N.
+// This function must be called BEFORE nullspace_project_inplace.
 // =============================================================================
 
 void UpdaterMSCKF_Corr::apply_correntropy_to_block(
@@ -70,9 +70,9 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
 
     const int n = static_cast<int>(res_block.size());
 
-    // Güvenlik kontrolü — assert yerine yumuşak çıkış.
-    // Beklenmedik bir senaryoda (örn. ileride farklı projection adımı)
-    // n çift değilse Co'yu atla, normalize inovasyon da boş döner.
+    // Safety check — soft exit instead of assert.
+    // If n is not even (e.g., a future different projection step), skip Co
+    // and return an empty innovation vector.
     if (n <= 0 || (n % 2) != 0 ||
         H_block.rows() != n ||
         R_block.rows() != n || R_block.cols() != n) {
@@ -83,7 +83,7 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
     const int num_feat = n / 2;
     innov_out.resize(num_feat);
 
-    // Normalize inovasyonları her durumda hesapla (pencereye eklenecek)
+    // Compute normalized innovations regardless (will be added to the window)
     for (int i = 0; i < num_feat; i++) {
         const double u_err = res_block(2 * i);
         const double v_err = res_block(2 * i + 1);
@@ -96,12 +96,12 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
         innov_out(i) = norm_pix / r_avg;
     }
 
-    // Pencere dolmadıysa Co = I → değişiklik yok
+    // Window not yet full: Co = I, no change
     if (static_cast<int>(past_innov.size()) < N_window) {
         return;
     }
 
-    // Co = diag(G_i) ağırlığını H ve res'in satırlarına sol-çarpım olarak uygula
+    // Apply Co = diag(G_i) to H and res rows via left-multiplication
     for (int i = 0; i < num_feat; i++) {
         const double G = correntropy_weight(innov_out(i), sigma_cam);
         H_block.row(2 * i)     *= G;
@@ -146,7 +146,7 @@ Eigen::MatrixXd UpdaterMSCKF_Corr::estimate_R(
         R_new(i, i) *= scale;
     }
 
-    PRINT_DEBUG("[CorrUpdater] R ölçek=%.3f (mean_sq=%.3f)\n", scale, mean_sq);
+    PRINT_DEBUG("[CorrUpdater] R scale=%.3f (mean_sq=%.3f)\n", scale, mean_sq);
     return R_new;
 }
 
@@ -163,7 +163,7 @@ void UpdaterMSCKF_Corr::push_innovation_history(
 }
 
 // =============================================================================
-// Ana güncelleme fonksiyonu
+// Main update function
 // =============================================================================
 
 void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
@@ -176,7 +176,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT0 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // 0) Clone zamanları
+    // 0) Clone timestamps
     // ------------------------------------------------------------------
     std::vector<double> clonetimes;
     for (const auto &clone_imu : state->_clones_IMU) {
@@ -184,7 +184,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     }
 
     // ------------------------------------------------------------------
-    // 1) Feature ölçümlerini temizle
+    // 1) Clean feature measurements
     // ------------------------------------------------------------------
     auto it0 = feature_vec.begin();
     while (it0 != feature_vec.end()) {
@@ -205,7 +205,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT1 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // 2) Clone pose vektörü
+    // 2) Clone pose vector
     // ------------------------------------------------------------------
     std::unordered_map<size_t,
         std::unordered_map<double, FeatureInitializer::ClonePose>> clones_cam;
@@ -249,7 +249,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     rT2 = boost::posix_time::microsec_clock::local_time();
 
     // ------------------------------------------------------------------
-    // Maksimum boyut hesabı
+    // Maximum size computation
     // ------------------------------------------------------------------
     size_t max_meas_size = 0;
     for (size_t i = 0; i < feature_vec.size(); i++) {
@@ -273,7 +273,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     Eigen::VectorXd innov_acc;
 
     // ------------------------------------------------------------------
-    // 4) Her feature için Jacobian + correntropy + null-space + chi2
+    // 4) Per-feature Jacobian + correntropy + null-space + chi2
     // ------------------------------------------------------------------
     auto it2 = feature_vec.begin();
     while (it2 != feature_vec.end()) {
@@ -305,19 +305,19 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
         Eigen::VectorXd res;
         std::vector<std::shared_ptr<Type>> Hx_order;
 
-        // Ham Jacobian — bu noktada res [u1,v1, u2,v2, ...] yapısında
+        // Raw Jacobian — at this point res is laid out as [u1,v1, u2,v2, ...]
         UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
 
-        // ----- ÖNEMLİ: Correntropy ağırlığını NULL-SPACE'TEN ÖNCE uygula -----
-        // Çünkü nullspace_project_inplace satır sayısını 2N → 2N-3'e
-        // düşürür ve (u,v) çift yapısı kaybolur.
+        // ----- IMPORTANT: apply correntropy weight BEFORE null-space projection -----
+        // nullspace_project_inplace reduces row count from 2N to 2N-3,
+        // destroying the (u,v) pair structure needed by the correntropy step.
         Eigen::MatrixXd R_pre = _options.sigma_pix_sq *
             Eigen::MatrixXd::Identity(res.rows(), res.rows());
 
         Eigen::VectorXd block_innov;
         apply_correntropy_to_block(H_x, res, R_pre, block_innov);
 
-        // İnovasyonu pencere için biriktir
+        // Accumulate innovation for the sliding window
         if (block_innov.size() > 0) {
             Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
             if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
@@ -325,10 +325,10 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
             innov_acc = merged;
         }
 
-        // ----- Şimdi null-space projeksiyonu (orijinal akış) -----
+        // ----- Null-space projection (original flow) -----
         UpdaterHelper::nullspace_project_inplace(H_f, H_x, res);
 
-        // ----- Chi2 testi -----
+        // ----- Chi2 test -----
         Eigen::MatrixXd P_marg = StateHelper::get_marginal_covariance(state, Hx_order);
         Eigen::MatrixXd S = H_x * P_marg * H_x.transpose();
         S.diagonal() += _options.sigma_pix_sq * Eigen::VectorXd::Ones(S.rows());
@@ -350,7 +350,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
             continue;
         }
 
-        // ----- Büyük H ve res'e ekle -----
+        // ----- Stack into large H and res -----
         size_t ct_hx = 0;
         for (const auto &var : Hx_order) {
             if (Hx_mapping.find(var) == Hx_mapping.end()) {
@@ -369,7 +369,7 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     }
     rT3 = boost::posix_time::microsec_clock::local_time();
 
-    // İşlenen feature'ları sil
+    // Mark processed features for deletion
     for (size_t f = 0; f < feature_vec.size(); f++) {
         feature_vec[f]->to_delete = true;
     }
@@ -380,13 +380,13 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     res_big.conservativeResize(ct_meas, 1);
     Hx_big.conservativeResize(ct_meas, ct_jacob);
 
-    // İnovasyonları pencereye ekle (TEK YERDE)
+    // Push innovations to window (single accumulation point)
     if (innov_acc.size() > 0) {
         push_innovation_history(innov_acc);
     }
 
     // ------------------------------------------------------------------
-    // 5) QR ile ölçüm sıkıştırması
+    // 5) QR measurement compression
     // ------------------------------------------------------------------
     UpdaterHelper::measurement_compress_inplace(Hx_big, res_big);
     if (Hx_big.rows() < 1) {
@@ -397,11 +397,11 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     Eigen::MatrixXd R_big = _options.sigma_pix_sq *
         Eigen::MatrixXd::Identity(res_big.rows(), res_big.rows());
 
-    // Kayan pencere ile R'yi ölçeklendir
+    // Scale R using the sliding-window estimate
     R_big = estimate_R(R_big);
 
     // ------------------------------------------------------------------
-    // 6) EKF güncellemesi
+    // 6) EKF update
     // ------------------------------------------------------------------
     StateHelper::EKFUpdate(state, Hx_order_big, Hx_big, res_big, R_big);
     rT5 = boost::posix_time::microsec_clock::local_time();

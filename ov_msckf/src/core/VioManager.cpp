@@ -362,19 +362,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // NOTE: if the state is already at the given time (can happen in sim)
   // NOTE: then no need to prop since we already are at the desired timestep
 
-  // IMU verilerini kullanarak
-  //(entegrasyon yaparak) EKF'nin tahmin (prediction) adımını gerçekleştirir.
-
-  /*
-
-  "and_clone": Bu fonksiyon sadece yayılım yapmakla kalmaz,
-  aynı zamanda message.timestamp anındaki yeni IMU pozunu
-  (kamera pozunu) durum vektörüne bir "klon" olarak ekler.
-  Bu, MSCKF'nin (Multi-State Constraint Kalman Filter) "Multi-State"
-  (Çoklu-Durum) kısmının temelidir.
-  Bu klonlar daha sonra görsel güncellemeler için kullanılacaktır.
-
-  */
+  // Propagate the EKF forward using IMU integration and augment the state
+  // with a new pose clone at message.timestamp. These clones form the
+  // "Multi-State" part of MSCKF and are used later for visual updates.
   if (state->_timestamp != message.timestamp) {
     propagator->propagate_and_clone(state, message.timestamp);
   }
@@ -382,10 +372,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
 
 
   if (is_initialized_vio && updaterWheel != nullptr) {
-      // Ana thread içindeyiz, State'e erişim güvenli.
       updaterWheel->try_update();
 
-      // Wheel update State'i değiştirdiği için cache'i geçersiz kılalım
+      // Wheel update modifies state, so invalidate the propagator cache
       propagator->invalidate_cache();
   }
   // If we have not reached max clones, we should just return...
@@ -414,37 +403,17 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   std::vector<std::shared_ptr<Feature>> feats_lost, feats_marg, feats_slam;
   feats_lost = trackFEATS->get_feature_database()->features_not_containing_newer(state->_timestamp, false, true);
 
-  /*
-  Ne yapıyor? trackFEATS veritabanından, bu yeni karede artık
-  görünmeyen (yani takibi kaybedilen) özellikleri alır.
+  // feats_lost: features no longer visible in the current frame.
+  // In standard MSCKF, once tracking ends the accumulated observations
+  // across past clones are used for an EKF update.
 
-  Açıklama: Standart MSCKF, bir özellik (feature) takibi bittiği anda,
-  o özelliğin geçmiş klonlarda gözlemlendiği tüm pozisyonları
-  kullanarak bir güncelleme yapar. feats_lost bu güncellemeyi tetikleyecek
-  özelliklerin listesidir.
-
-  */
-
-  /*
-  Temel amacı, sistemin durum vektöründen en eski kamera pozunu (klonu)
-  atmaya karar verdiğinde, bu atılacak olan klonun gördüğü özellikleri
-  toplamaktır
-  */
+  // feats_marg: features seen by the oldest clone that is about to be
+  // marginalized out of the state vector.
   // Don't need to get the oldest features until we reach our max number of clones
   if ((int)state->_clones_IMU.size() > state->_options.max_clone_size || (int)state->_clones_IMU.size() > 5) {
     feats_marg = trackFEATS->get_feature_database()->features_containing(state->margtimestep(), false, true);
-    /*
-    Ne yapıyor? Marjinalize edilecek (atılacak) olan en eski
-    klonun gördüğü tüm normal özellikleri (örn. KLT ile izlenen köşe noktaları)
-    bulur.
-    */
     if (trackARUCO != nullptr && message.timestamp - startup_time >= params.dt_slam_delay) {
       feats_slam = trackARUCO->get_feature_database()->features_containing(state->margtimestep(), false, true);
-    /*
-    Ne yapıyor? Eğer sistem SLAM özelliklerini (bu durumda ArUco etiketlerini)
-    de takip ediyorsa, marjinalize edilecek klonun gördüğü SLAM özelliklerini
-    de toplar.
-    */
     }
   }
 
@@ -479,23 +448,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
     }
   }
 
-  /*
-  Sistemde iki ana güncelleme yolu vardır:
-
-    feats_lost: Takibi yeni biten özellikler.
-    Bunlar standart bir MSCKF güncellemesi için kullanılır.
-
-    feats_marg: En eski kamera pozu (klon) atılırken
-    (marjinalize edilirken) o pozun gördüğü özellikler. Bunlar, marjinalizasyon "prior"ı oluşturmak veya SLAM özelliklerine dönüştürülmek için kullanılır.
-
-  Bir özelliğin aynı anda hem takibinin kaybolması
-  (feats_lost'a girmesi) hem de o özelliği gören en eski
-  pozun marjinalize edilmesi (feats_marg'a girmesi) mümkündür.
-
-  Bu kod bloğu, bu çakışmayı çözer. Eğer bir özellik iki listede de varsa,
-  bu kod onu feats_lost listesinden silerek marjinalizasyon
-  işlemine (feats_marg) öncelik verir.
-  */
+  // A feature can appear in both feats_lost and feats_marg simultaneously.
+  // Resolve the conflict by removing it from feats_lost, giving priority
+  // to the marginalization path (feats_marg).
   // Find tracks that have reached max length, these can be made into SLAM features
   std::vector<std::shared_ptr<Feature>> feats_maxtracks;
   auto it2 = feats_marg.begin();
@@ -529,27 +484,10 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // Append a new SLAM feature if we have the room to do so
   // Also check that we have waited our delay amount (normally prevents bad first set of slam points)
 
-  /*
-  Bu kod bloğu, marjinalize edilmekte olan en iyi VIO özelliklerini
-  (adaylar 'feats_maxtracks' listesinde) kalıcı SLAM özelliklerine "terfi ettirme"
-   işlemini yönetir.
-  */
-
-  /*
-  İlk olarak, (a) SLAM özelliğinin ayarlarda aktif olup olmadığını ('max_slam_features > 0'),
-  (b) sistemin kararlı hale gelmesi için yeterli zamanın geçip geçmediğini ('dt_slam_delay')
-  ve (c) durum vektöründe yeni özellikler için yer olup olmadığını
-  ('_features_SLAM.size()' < 'max_slam_features' + 'curr_aruco_tags') kontrol eder.
-  */
-
-  // Eğer tüm bu koşullar sağlanırsa, eklenebilecek boş yer sayısını ('amount_to_add') ve
-  // elimizdeki aday sayısını ('feats_maxtracks.size()') karşılaştırarak eklenecek
-  // geçerli miktarı ('valid_amount') bulur (ikisinin minimumu).
-  // Son olarak, 'valid_amount > 0' ise, en iyi 'valid_amount' kadar adayı
-  //'feats_maxtracks' listesinden alır ve 'feats_slam' listesine (SLAM güncellemesi için) ekler.
-  // Bu özellikler 'feats_maxtracks' listesinden silinir; bu, aynı bilginin hem SLAM'a
-  // eklenip hem de marjinalize edilerek "double-counting" (çift sayım) hatası yapılmasını
-  //kritik olarak engeller.
+  // Promote the best VIO features (feats_maxtracks) to permanent SLAM features
+  // if SLAM is enabled, the startup delay has elapsed, and there is room in the
+  // state vector. Features added to feats_slam are removed from feats_maxtracks
+  // to prevent double-counting during marginalization.
 
   if (state->_options.max_slam_features > 0 && message.timestamp - startup_time >= params.dt_slam_delay &&
       (int)state->_features_SLAM.size() < state->_options.max_slam_features + curr_aruco_tags) {
@@ -570,21 +508,10 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // NOTE: if you do not use FEJ, these types of slam features *degrade* the estimator performance....
   // NOTE: we will also marginalize SLAM features if they have failed their update a couple times in a row
 
-  // Bu döngü, 'state->_features_SLAM' içinde kayıtlı tüm kalıcı SLAM özelliklerinin
-  //(landmark) yaşam döngüsünü yönetir.
-  // Döngü, iki temel işlevi yerine getirir:
-
-  // 1. GÜNCELLEME İÇİN VERİ TOPLAMA: 'trackARUCO' ve 'trackFEATS' veritabanlarını
-  //kontrol ederek bu kalıcı özelliklerden hangilerinin *şu anda aktif olarak göründüğünü*
-  // tespit eder ve bu güncel gözlemleri ('feat1' veya 'feat2') EKF güncellemesinde
-  //kullanılmak üzere 'feats_slam' listesine ekler.
-
-  // 2. TEMİZLİK (MARJİNALİZASYON): Güvenilmez veya "ölü" özellikleri sistemden
-  // çıkarmak (marjinalize etmek) için işaretler. Bir özelliği 'should_marg = true'
-  //olarak işaretlemek için iki koşulu kontrol eder: (a) Özelliği ilk tanımlayan
-  // 'çapa' kamera ('_unique_camera_id') şu an aktif olmasına rağmen özellik artık
-  //izlenemiyorsa ('feat2 == nullptr') veya (b) özelliğin EKF güncellemesindeki
-  //başarısızlık sayısı ('update_fail_count') belirlenen eşiği aştıysa.
+  // For each active SLAM landmark: collect current observations for the EKF
+  // update (feats_slam), and flag unreliable or lost landmarks for marginalization
+  // (should_marg = true if the anchor camera is active but the feature is no longer
+  // tracked, or if update_fail_count exceeds the threshold).
 
   for (std::pair<const size_t, std::shared_ptr<Landmark>> &landmark : state->_features_SLAM) {
     if (trackARUCO != nullptr) {
@@ -609,11 +536,8 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // We do *NOT* marginalize out our aruco tags landmarks
   StateHelper::marginalize_slam(state);
 
-  // Separate our SLAM features into new ones, and old ones
-  // Bu kod bloğu, 'feats_slam' listesindeki (o an görülen veya terfi ettirilen) tüm SLAM özelliklerini iki kategoriye ayırır.
-  // Döngü, her özelliğin 'featid'sinin ana filtre durumunda ('state->_features_SLAM') zaten kayıtlı bir "landmark" (kalıcı özellik) olup olmadığını kontrol eder.
-  // Eğer özellik 'state' içinde bulunursa, bu "eski" bir özelliğin yeni bir gözlemidir ve 'feats_slam_UPDATE' listesine eklenir (bu, mevcut landmark'ın pozisyonunu EKF'de güncellemek için kullanılacaktır).
-  // Eğer özellik 'state' içinde bulunmazsa, bu "yeni" bir SLAM özelliğidir (örn. VIO'dan yeni terfi etmiş) ve 'feats_slam_DELAYED' listesine eklenir (bu, muhtemelen daha sonra üçgenleştirilip (triangulation) filtre durumuna yeni bir landmark olarak eklenecektir).
+  // Split SLAM features into known landmarks (UPDATE) and newly promoted ones
+  // (DELAYED) that must be triangulated and added to the state first.
   std::vector<std::shared_ptr<Feature>> feats_slam_DELAYED, feats_slam_UPDATE;
   for (size_t i = 0; i < feats_slam.size(); i++) {
     if (state->_features_SLAM.find(feats_slam.at(i)->featid) != state->_features_SLAM.end()) {
@@ -640,17 +564,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // TODO: we should have better selection logic here (i.e. even feature distribution in the FOV etc..)
   // TODO: right now features that are "lost" are at the front of this vector, while ones at the end are long-tracks
 
-  // Bu kod bloğu, 'featsup_MSCKF' (MSCKF güncellemesi için kullanılacak özellikler) listesini sıralar.
-  // Sıralama işlemi için 'compare_feat' adında özel bir lambda (anonim) fonksiyon tanımlanır.
-  // Bu 'compare_feat' fonksiyonu, iki özelliği ('a' ve 'b') karşılaştırır;
-  //her bir özelliğin 'timestamps' (zaman damgaları) kaydındaki toplam gözlem
-  //(measurement) sayısını ('asize' ve 'bsize') hesaplar.
-  // 'return asize < bsize;' ifadesi, sıralamanın *artan* (ascending)
-  //düzende yapılmasını sağlar.
-  // Sonuç olarak, 'std::sort' çağrısı bittiğinde, 'featsup_MSCKF'
-  //vektöründeki özellikler, *en az* gözlem sayısına sahip olandan
-  //*en çok* gözlem sayısına sahip olana doğru sıralanmış olur
-  //(listenin başında en az, sonunda en çok gözlenen özellikler yer alır).
+  // Sort featsup_MSCKF ascending by total observation count so that the
+  // least-observed (least reliable) features are at the front and get
+  // dropped first when the list is capped at max_msckf_in_update.
   auto compare_feat = [](const std::shared_ptr<Feature> &a, const std::shared_ptr<Feature> &b) -> bool {
     size_t asize = 0;
     size_t bsize = 0;
@@ -666,12 +582,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // NOTE: if we have more then the max, we select the "best" ones (i.e. max tracks) for this update
   // NOTE: this should only really be used if you want to track a lot of features, or have limited computational resources
 
-  // Bu kod bloğu, hesaplama yükünü yönetmek amacıyla EKF güncellemesinde kullanılacak MSCKF özelliklerinin sayısını sınırlar.
-  // İlk olarak, 'featsup_MSCKF' listesindeki özellik sayısının 'max_msckf_in_update' limitini aşıp aşmadığını kontrol eder.
-  // Eğer aşıyorsa, listenin başından itibaren (bir önceki adımda en az gözleme sahip olacak şekilde sıralanmışlardı) özellikleri siler ('erase' işlemi). Bu, güncelleme için sadece en çok gözleme sahip olan (en güvenilir) 'max_msckf_in_update' kadar özelliğin tutulmasını sağlar.
-  // Ardından, bu "ayıklanmış" (pruned) özellik listesini kullanarak 'updaterMSCKF->update' fonksiyonunu çağırarak EKF'nin ana ölçüm güncelleme (measurement update) adımını 🎯 gerçekleştirir.
-  // EKF güncellemesi sonucu 'state' değiştiği için, 'propagator'ün IMU ön-entegrasyon önbelleğini ('invalidate_cache()') geçersiz kılar; bu, bir sonraki tahmin (prediction) adımının bu yeni düzeltilmiş duruma göre yapılmasını garanti eder.
-  // Son olarak, 'rT4' değişkenine işlemin bitiş zamanını kaydederek performans takibi yapar.
+  // Limit the number of MSCKF features used in the EKF update to bound compute.
+  // Features are already sorted by track length (fewest observations first), so
+  // erasing from the front keeps the most-observed (most reliable) features.
   if ((int)featsup_MSCKF.size() > state->_options.max_msckf_in_update)
     featsup_MSCKF.erase(featsup_MSCKF.begin(), featsup_MSCKF.end() - state->_options.max_msckf_in_update);
   updaterMSCKF->update(state, featsup_MSCKF);
@@ -682,12 +595,9 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   // NOTE: that we provide the option here to do a *sequential* update
   // NOTE: this will be a lot faster but won't be as accurate.
 
-  // Bu kod bloğu, o an yeniden gözlemlenen 'feats_slam_UPDATE' listesindeki (yani 'state'de zaten var olan) SLAM özelliklerini *parçalar halinde* (batch processing) işler.
-  // 'while' döngüsü, 'feats_slam_UPDATE' listesi boşalana kadar çalışır.
-  // Her döngü adımında, 'max_slam_in_update' ayarıyla belirlenen boyutta küçük bir özellik alt kümesi ('featsup_TEMP') ana listeden alır ve bu alt küme ile 'updaterSLAM->update' fonksiyonunu çağırarak EKF durumunu günceller.
-  // Bu "batch" (parça) halindeki güncelleme, tek bir adımda yüzlerce özelliği işleyerek oluşabilecek yüksek hesaplama maliyetini 📈 (computational cost) önlemek için kullanılır.
-  // Her bir 'update' çağrısı 'state'i değiştirdiği için, 'propagator'ün ön-entegrasyon önbelleği ('invalidate_cache()') bir sonraki partinin doğru (düzeltilmiş) durum üzerinden devam etmesi için her adımda geçersiz kılınır.
-  // İşlenen özellikler 'feats_slam_UPDATE_TEMP' listesinde toplanır.
+  // Process known SLAM landmarks in batches of max_slam_in_update to bound
+  // per-step compute cost. The propagator cache is invalidated after each
+  // batch because each update modifies state.
   std::vector<std::shared_ptr<Feature>> feats_slam_UPDATE_TEMP;
   while (!feats_slam_UPDATE.empty()) {
     // Get sub vector of the features we will update with
@@ -706,12 +616,6 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
   updaterSLAM->delayed_init(state, feats_slam_DELAYED);
   rT6 = boost::posix_time::microsec_clock::local_time();
 
-  // Bu kod bloğu, SLAM özellik güncellemelerini tamamlar ve yeni SLAM özelliklerini başlatır.
-  // 'feats_slam_UPDATE = feats_slam_UPDATE_TEMP;': Önceki 'while' döngüsünde (parçalar halinde) başarıyla güncellenen tüm SLAM özelliklerini 'feats_slam_UPDATE' listesinde birleştirir/son haline getirir.
-  // 'rT5 = ...': Tüm SLAM *güncellemelerinin* (update) bittiği anı zamanlama için kaydeder.
-  // 'updaterSLAM->delayed_init(state, feats_slam_DELAYED);': Bu, bloğun ana işlemidir 🚀. 'feats_slam_DELAYED' listesindeki (yani VIO'dan yeni terfi etmiş ve henüz 'state'de olmayan) *yeni* özellikleri alır.
-  // Bu fonksiyon, bu özellikleri (geçmiş pozları kullanarak) üçgenleştirmeye (triangulate) çalışır ve başarılı olursa, EKF durumunu ('state') bu yeni 3D landmark'ları içerecek şekilde *genişletir* (augment).
-  // 'rT6 = ...': Yeni özelliklerin bu "gecikmeli başlatma" (delayed initialization) işleminin bittiği anı zamanlama için kaydeder.
 
 
   //===================================================================================
