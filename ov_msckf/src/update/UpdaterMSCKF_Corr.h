@@ -69,7 +69,7 @@ private:
     // ---------- Correntropy parameters ----------
     int    N_window  = 75;
     int    W_recent  = 5;
-    double sigma_cam = 10.0;
+    double sigma_cam = 1.5;
 
     /// Sliding window of per-feature normalized innovation magnitudes
     std::deque<Eigen::VectorXd> past_innov;
@@ -83,7 +83,7 @@ private:
     /// Writes normalized innovations to innov_out for appending to the window.
     void apply_correntropy_to_block(Eigen::MatrixXd &H_block,
                                     Eigen::VectorXd &res_block,
-                                    const Eigen::MatrixXd &R_block,
+                                    Eigen::MatrixXd &R_block,
                                     Eigen::VectorXd &innov_out) const;
 
     /// Estimates a scale factor from the sliding window and updates R.

@@ -65,14 +65,11 @@ double UpdaterMSCKF_Corr::correntropy_weight(double norm_innov,
 void UpdaterMSCKF_Corr::apply_correntropy_to_block(
         Eigen::MatrixXd &H_block,
         Eigen::VectorXd &res_block,
-        const Eigen::MatrixXd &R_block,
+        Eigen::MatrixXd &R_block,
         Eigen::VectorXd &innov_out) const {
 
     const int n = static_cast<int>(res_block.size());
 
-    // Safety check — soft exit instead of assert.
-    // If n is not even (e.g., a future different projection step), skip Co
-    // and return an empty innovation vector.
     if (n <= 0 || (n % 2) != 0 ||
         H_block.rows() != n ||
         R_block.rows() != n || R_block.cols() != n) {
@@ -83,32 +80,18 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
     const int num_feat = n / 2;
     innov_out.resize(num_feat);
 
-    // Compute normalized innovations regardless (will be added to the window)
+    // Normalized Mahalanobis innovation per feature — same formula as Python:
+    //   norm_innov = sqrt(y * inv_R * y)  per measurement dimension
     for (int i = 0; i < num_feat; i++) {
         const double u_err = res_block(2 * i);
         const double v_err = res_block(2 * i + 1);
-        const double norm_pix = std::sqrt(u_err * u_err + v_err * v_err);
-
-        const double r_u = std::sqrt(std::max(R_block(2 * i,     2 * i),     1e-9));
-        const double r_v = std::sqrt(std::max(R_block(2 * i + 1, 2 * i + 1), 1e-9));
-        const double r_avg = 0.5 * (r_u + r_v);
-
-        innov_out(i) = norm_pix / r_avg;
+        const double r_u = std::max(R_block(2 * i,     2 * i),     1e-9);
+        const double r_v = std::max(R_block(2 * i + 1, 2 * i + 1), 1e-9);
+        const double norm_u = std::sqrt(u_err * u_err / r_u);
+        const double norm_v = std::sqrt(v_err * v_err / r_v);
+        innov_out(i) = std::sqrt(norm_u * norm_u + norm_v * norm_v);
     }
-
-    // Window not yet full: Co = I, no change
-    if (static_cast<int>(past_innov.size()) < N_window) {
-        return;
-    }
-
-    // Apply Co = diag(G_i) to H and res rows via left-multiplication
-    for (int i = 0; i < num_feat; i++) {
-        const double G = correntropy_weight(innov_out(i), sigma_cam);
-        H_block.row(2 * i)     *= G;
-        H_block.row(2 * i + 1) *= G;
-        res_block(2 * i)       *= G;
-        res_block(2 * i + 1)   *= G;
-    }
+    // H and res are NOT modified — G is applied to R_big after QR (see update())
 }
 
 // =============================================================================
@@ -271,6 +254,8 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     size_t ct_meas  = 0;
 
     Eigen::VectorXd innov_acc;
+    double G_frame = 1.0;   // geometric mean of per-feature G this frame
+    int    G_count = 0;
 
     // ------------------------------------------------------------------
     // 4) Per-feature Jacobian + correntropy + null-space + chi2
@@ -308,21 +293,30 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
         // Raw Jacobian — at this point res is laid out as [u1,v1, u2,v2, ...]
         UpdaterHelper::get_feature_jacobian_full(state, feat, H_f, H_x, res, Hx_order);
 
-        // ----- IMPORTANT: apply correntropy weight BEFORE null-space projection -----
-        // nullspace_project_inplace reduces row count from 2N to 2N-3,
-        // destroying the (u,v) pair structure needed by the correntropy step.
+        // Compute normalized innovations BEFORE null-space (u,v pair structure intact).
+        // H and res are NOT modified here — G is applied to R_big after QR compression.
         Eigen::MatrixXd R_pre = _options.sigma_pix_sq *
             Eigen::MatrixXd::Identity(res.rows(), res.rows());
 
         Eigen::VectorXd block_innov;
         apply_correntropy_to_block(H_x, res, R_pre, block_innov);
 
-        // Accumulate innovation for the sliding window
+        // Accumulate normalized innovations and compute frame G
         if (block_innov.size() > 0) {
             Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
             if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
             merged.tail(block_innov.size()) = block_innov;
             innov_acc = merged;
+
+            // Accumulate G (log-space for geometric mean, Python-equivalent)
+            if (static_cast<int>(past_innov.size()) >= N_window) {
+                for (int bi = 0; bi < block_innov.size(); bi++) {
+                    double g = correntropy_weight(block_innov(bi), sigma_cam);
+                    g = std::max(g, 1e-3);
+                    G_frame += std::log(g);
+                    G_count++;
+                }
+            }
         }
 
         // ----- Null-space projection (original flow) -----
@@ -397,7 +391,18 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
     Eigen::MatrixXd R_big = _options.sigma_pix_sq *
         Eigen::MatrixXd::Identity(res_big.rows(), res_big.rows());
 
-    // Scale R using the sliding-window estimate
+    // Apply frame-level correntropy gain to R_big (equivalent to Python K reduction):
+    // G_frame = geometric mean of per-feature G this frame
+    // G small → R large → Kalman gain drops → noisy frame contributes less to state update
+    if (G_count > 0) {
+        const double G_geom = std::exp(G_frame / G_count);   // geometric mean
+        const double inv_G2 = 1.0 / (G_geom * G_geom);
+        R_big *= inv_G2;
+        PRINT_DEBUG("[CorrUpdater] Co active | G_geom=%.3f  R_scale=%.2f  n_feats=%d\n",
+                    G_geom, inv_G2, G_count);
+    }
+
+    // Additional sliding-window R estimate (adaptive noise)
     R_big = estimate_R(R_big);
 
     // ------------------------------------------------------------------

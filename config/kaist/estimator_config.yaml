@@ -7,6 +7,11 @@ integration: "rk4" # discrete, rk4, analytical (if rk4 or analytical used then a
 use_stereo: true # if we have more than 1 camera, if we should try to track stereo constraints
 max_cameras: 2 # how many cameras we have 1 = mono, 2 = stereo, >2 = binocular (all mono tracking)
 
+wheel_odometry : false
+wheel_calib_ext : false
+wheel_calib_int : false
+wheel_calib_dt : false
+
 calib_cam_extrinsics: false # degenerate motion
 calib_cam_intrinsics: true
 calib_cam_timeoffset: true # degenerate motion
