@@ -198,6 +198,13 @@ struct VioManagerOptions {
     if (parser != nullptr) {
       parser->parse_config("up_msckf_sigma_px", msckf_options.sigma_pix);
       parser->parse_config("up_msckf_chi2_multipler", msckf_options.chi2_multipler);
+      parser->parse_config("up_msckf_use_correntropy", msckf_options.use_correntropy);
+      parser->parse_config("up_msckf_correntropy_sigma", msckf_options.correntropy_sigma);
+      parser->parse_config("up_msckf_correntropy_window_size", msckf_options.correntropy_window_size);
+      parser->parse_config("up_msckf_correntropy_recent_window", msckf_options.correntropy_recent_window);
+      parser->parse_config("up_msckf_correntropy_adaptive_R", msckf_options.correntropy_adaptive_R);
+      parser->parse_config("up_msckf_correntropy_min_R_scale", msckf_options.correntropy_min_R_scale);
+      parser->parse_config("up_msckf_correntropy_max_R_scale", msckf_options.correntropy_max_R_scale);
       parser->parse_config("up_slam_sigma_px", slam_options.sigma_pix);
       parser->parse_config("up_slam_chi2_multipler", slam_options.chi2_multipler);
       parser->parse_config("up_aruco_sigma_px", aruco_options.sigma_pix);

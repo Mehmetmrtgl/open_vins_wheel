@@ -99,6 +99,14 @@ downsize_aruco: true
 # camera noises and chi-squared threshold multipliers
 up_msckf_sigma_px: 1
 up_msckf_chi2_multipler: 1
+# Robust correntropy MSCKF update. Keep false for baseline OpenVINS behavior.
+up_msckf_use_correntropy: false
+up_msckf_correntropy_sigma: 5.0
+up_msckf_correntropy_window_size: 75
+up_msckf_correntropy_recent_window: 5
+up_msckf_correntropy_adaptive_R: false
+up_msckf_correntropy_min_R_scale: 0.5
+up_msckf_correntropy_max_R_scale: 5.0
 up_slam_sigma_px: 1
 up_slam_chi2_multipler: 1
 up_aruco_sigma_px: 1
