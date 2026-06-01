@@ -41,8 +41,18 @@ UpdaterMSCKF_Corr::UpdaterMSCKF_Corr(UpdaterOptions &options,
         chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
     }
 
-    PRINT_DEBUG("[CorrUpdater] initialized | N=%d  W=%d  sigma=%.2f\n",
-                N_window, W_recent, sigma_cam);
+    _options.correntropy_window_size = std::max(1, _options.correntropy_window_size);
+    _options.correntropy_recent_window = std::max(1, _options.correntropy_recent_window);
+    _options.correntropy_sigma = std::max(1e-6, _options.correntropy_sigma);
+    if (_options.correntropy_min_R_scale > _options.correntropy_max_R_scale) {
+        std::swap(_options.correntropy_min_R_scale, _options.correntropy_max_R_scale);
+    }
+
+    PRINT_DEBUG("[CorrUpdater] initialized | enabled=%s  N=%d  W=%d  sigma=%.2f  adaptive_R=%s\n",
+                _options.use_correntropy ? "true" : "false",
+                _options.correntropy_window_size, _options.correntropy_recent_window,
+                _options.correntropy_sigma,
+                _options.correntropy_adaptive_R ? "true" : "false");
 }
 
 // =============================================================================
@@ -57,24 +67,24 @@ double UpdaterMSCKF_Corr::correntropy_weight(double norm_innov,
 // =============================================================================
 // apply_correntropy_to_block
 //
-// H_block and res_block are the raw outputs of get_feature_jacobian_full.
+// H_f, H_x, and res_block are the raw outputs of get_feature_jacobian_full.
 // Rows are laid out as [u1,v1, u2,v2, ...], so the count is always 2N.
 // This function must be called BEFORE nullspace_project_inplace.
 // =============================================================================
 
 void UpdaterMSCKF_Corr::apply_correntropy_to_block(
-        Eigen::MatrixXd &H_block,
+        Eigen::MatrixXd &H_f,
+        Eigen::MatrixXd &H_x,
         Eigen::VectorXd &res_block,
         const Eigen::MatrixXd &R_block,
         Eigen::VectorXd &innov_out) const {
 
     const int n = static_cast<int>(res_block.size());
 
-    // Safety check — soft exit instead of assert.
-    // If n is not even (e.g., a future different projection step), skip Co
-    // and return an empty innovation vector.
+    // Safety check — soft exit instead of assert. Rows are laid out as
+    // [u1,v1,u2,v2,...] before null-space projection.
     if (n <= 0 || (n % 2) != 0 ||
-        H_block.rows() != n ||
+        H_f.rows() != n || H_x.rows() != n ||
         R_block.rows() != n || R_block.cols() != n) {
         innov_out = Eigen::VectorXd();
         return;
@@ -83,31 +93,35 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
     const int num_feat = n / 2;
     innov_out.resize(num_feat);
 
-    // Compute normalized innovations regardless (will be added to the window)
     for (int i = 0; i < num_feat; i++) {
         const double u_err = res_block(2 * i);
         const double v_err = res_block(2 * i + 1);
         const double norm_pix = std::sqrt(u_err * u_err + v_err * v_err);
 
-        const double r_u = std::sqrt(std::max(R_block(2 * i,     2 * i),     1e-9));
+        const double r_u = std::sqrt(std::max(R_block(2 * i, 2 * i), 1e-9));
         const double r_v = std::sqrt(std::max(R_block(2 * i + 1, 2 * i + 1), 1e-9));
         const double r_avg = 0.5 * (r_u + r_v);
 
         innov_out(i) = norm_pix / r_avg;
     }
 
-    // Window not yet full: Co = I, no change
-    if (static_cast<int>(past_innov.size()) < N_window) {
+    if (!_options.use_correntropy) {
         return;
     }
 
-    // Apply Co = diag(G_i) to H and res rows via left-multiplication
+    // Robust weighted least squares: apply sqrt(G) to both sides of the
+    // measurement equation. Weight H_f as well, otherwise the null-space
+    // projection is built from a different feature Jacobian than the weighted
+    // state/residual rows.
     for (int i = 0; i < num_feat; i++) {
-        const double G = correntropy_weight(innov_out(i), sigma_cam);
-        H_block.row(2 * i)     *= G;
-        H_block.row(2 * i + 1) *= G;
-        res_block(2 * i)       *= G;
-        res_block(2 * i + 1)   *= G;
+        const double G = correntropy_weight(innov_out(i), _options.correntropy_sigma);
+        const double sqrt_G = std::sqrt(std::max(G, 1e-12));
+        H_f.row(2 * i) *= sqrt_G;
+        H_f.row(2 * i + 1) *= sqrt_G;
+        H_x.row(2 * i) *= sqrt_G;
+        H_x.row(2 * i + 1) *= sqrt_G;
+        res_block(2 * i) *= sqrt_G;
+        res_block(2 * i + 1) *= sqrt_G;
     }
 }
 
@@ -118,15 +132,17 @@ void UpdaterMSCKF_Corr::apply_correntropy_to_block(
 Eigen::MatrixXd UpdaterMSCKF_Corr::estimate_R(
         const Eigen::MatrixXd &R_meas_in) const {
 
-    if (static_cast<int>(past_innov.size()) < N_window) {
+    if (!_options.correntropy_adaptive_R ||
+        static_cast<int>(past_innov.size()) < _options.correntropy_window_size) {
         return R_meas_in;
     }
 
     const int n_buf = static_cast<int>(past_innov.size());
-    const int start = std::max(0, n_buf - W_recent);
+    const int W = std::max(1, _options.correntropy_recent_window);
+    const int start = std::max(0, n_buf - W);
 
     double sum_sq = 0.0;
-    int    count  = 0;
+    int count = 0;
 
     for (int i = start; i < n_buf; i++) {
         const Eigen::VectorXd &v = past_innov[i];
@@ -139,7 +155,8 @@ Eigen::MatrixXd UpdaterMSCKF_Corr::estimate_R(
     if (count == 0) return R_meas_in;
 
     const double mean_sq = sum_sq / static_cast<double>(count);
-    const double scale = std::min(std::max(mean_sq, 0.5), 5.0);
+    const double scale = std::min(std::max(mean_sq, _options.correntropy_min_R_scale),
+                                  _options.correntropy_max_R_scale);
 
     Eigen::MatrixXd R_new = R_meas_in;
     for (int i = 0; i < R_new.rows(); i++) {
@@ -157,7 +174,8 @@ Eigen::MatrixXd UpdaterMSCKF_Corr::estimate_R(
 void UpdaterMSCKF_Corr::push_innovation_history(
         const Eigen::VectorXd &innov_this_step) {
     past_innov.push_back(innov_this_step);
-    while (static_cast<int>(past_innov.size()) > N_window) {
+    const int window_size = std::max(1, _options.correntropy_window_size);
+    while (static_cast<int>(past_innov.size()) > window_size) {
         past_innov.pop_front();
     }
 }
@@ -315,15 +333,8 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
             Eigen::MatrixXd::Identity(res.rows(), res.rows());
 
         Eigen::VectorXd block_innov;
-        apply_correntropy_to_block(H_x, res, R_pre, block_innov);
+        apply_correntropy_to_block(H_f, H_x, res, R_pre, block_innov);
 
-        // Accumulate innovation for the sliding window
-        if (block_innov.size() > 0) {
-            Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
-            if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
-            merged.tail(block_innov.size()) = block_innov;
-            innov_acc = merged;
-        }
 
         // ----- Null-space projection (original flow) -----
         UpdaterHelper::nullspace_project_inplace(H_f, H_x, res);
@@ -348,6 +359,14 @@ void UpdaterMSCKF_Corr::update(std::shared_ptr<State> state,
             (*it2)->to_delete = true;
             it2 = feature_vec.erase(it2);
             continue;
+        }
+
+        // Accumulate accepted-feature innovations for the sliding window.
+        if (block_innov.size() > 0) {
+            Eigen::VectorXd merged(innov_acc.size() + block_innov.size());
+            if (innov_acc.size() > 0) merged.head(innov_acc.size()) = innov_acc;
+            merged.tail(block_innov.size()) = block_innov;
+            innov_acc = merged;
         }
 
         // ----- Stack into large H and res -----

@@ -40,10 +40,37 @@ struct UpdaterOptions {
   /// Covariance for our raw pixel measurements
   double sigma_pix_sq = 1;
 
+  /// Enable correntropy reweighting for MSCKF feature updates
+  bool use_correntropy = false;
+
+  /// Normalized innovation sigma used by the correntropy kernel
+  double correntropy_sigma = 5.0;
+
+  /// Number of update innovations kept for optional adaptive-R estimation
+  int correntropy_window_size = 75;
+
+  /// Number of most-recent innovation batches used by adaptive-R estimation
+  int correntropy_recent_window = 5;
+
+  /// Enable innovation-based measurement covariance scaling
+  bool correntropy_adaptive_R = false;
+
+  /// Minimum adaptive-R diagonal scale
+  double correntropy_min_R_scale = 0.5;
+
+  /// Maximum adaptive-R diagonal scale
+  double correntropy_max_R_scale = 5.0;
+
   /// Nice print function of what parameters we have loaded
   void print() {
     PRINT_DEBUG("    - chi2_multipler: %.1f\n", chi2_multipler);
     PRINT_DEBUG("    - sigma_pix: %.2f\n", sigma_pix);
+    PRINT_DEBUG("    - use_correntropy: %s\n", use_correntropy ? "true" : "false");
+    PRINT_DEBUG("    - correntropy_sigma: %.2f\n", correntropy_sigma);
+    PRINT_DEBUG("    - correntropy_window_size: %d\n", correntropy_window_size);
+    PRINT_DEBUG("    - correntropy_recent_window: %d\n", correntropy_recent_window);
+    PRINT_DEBUG("    - correntropy_adaptive_R: %s\n", correntropy_adaptive_R ? "true" : "false");
+    PRINT_DEBUG("    - correntropy_R_scale: [%.2f, %.2f]\n", correntropy_min_R_scale, correntropy_max_R_scale);
   }
 };
 
