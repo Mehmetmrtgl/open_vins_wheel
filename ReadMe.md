@@ -7,29 +7,56 @@
 ## About this Fork
 
 This repository extends [OpenVINS](https://github.com/rpng/open_vins) with a **wheel odometry updater** for ground robots.
-It fuses wheel encoder measurements into the EKF state via preintegration (RK4), enabling more robust localization in environments with poor visual texture or aggressive IMU excitation.
+Wheel encoder measurements are fused into the EKF alongside visual and inertial data, improving robustness in textureless environments and under aggressive IMU excitation.
+
+The preintegration approach is inspired by [MINS](https://github.com/rpng/MINS) and uses **fourth-order Runge-Kutta (RK4)** integration between clone times for accurate dead-reckoning under varying wheel speeds.
 
 ### What's added
 
-- `UpdaterWheel` — EKF update step that preintegrates wheel odometry between clone times using RK4 and computes a linear measurement model (position + orientation residual)
-- `OptionsWheel` — configuration struct for wheel noise, extrinsic calibration (`T_imu_wheel`), and ROS topic
-- Pure-rotation detection — suppresses velocity updates when the platform is rotating in place
-- Ready-to-use configs for **ZED 2i**, **ZED X**, and **KAIST Urban** datasets (`config/zed2i/`, `config/zedx/`, `config/kaist/`)
+- **`UpdaterWheel`** — EKF update step that preintegrates wheel odometry between clone times using RK4 and computes a linear measurement model (position + orientation residual)
+- **`OptionsWheel`** — configuration struct for wheel noise, ROS topic, turn detection, and the IMU-to-wheel extrinsic transform (`T_imu_wheel`)
+- **RK4 preintegration** — replaces simple Euler integration; reduces drift when wheel speed changes between measurements
+- **Pure-rotation detection** — optionally suppresses velocity updates when the platform is turning in place (useful for Ackermann/differential-drive robots)
+- **Chi2 outlier rejection** — same gating mechanism as the MSCKF updater; configurable via `chi2_mult`
+- **Ready-to-use configs** for ZED 2i, ZED X, and the KAIST Urban dataset (`config/zed2i/`, `config/zedx/`, `config/kaist/`)
 
 ### Quick start (ROS 2)
 
-1. Set `wheel_odometry: true` in your `estimator_config.yaml`. Set `wheel_calib_ext: true` if you want to online-calibrate the IMU-to-wheel transform.
-2. Place a `wheel_config.yaml` next to your `estimator_config.yaml`. Ready-made examples are in `config/zed2i/` and `config/zedx/`. Set the `topic` field to your odometry topic, `noise_v`/`noise_w` to your encoder noise levels, and `T_imu_wheel` to the 4×4 rigid-body transform from the IMU frame to the wheel odometry frame.
-3. Launch as usual with `ros2 launch ov_msckf subscribe.launch.py`.
+1. In your `estimator_config.yaml`, set:
+   ```yaml
+   wheel_odometry: true
+   relative_config_wheel: "wheel_config.yaml"
+   # optional — online extrinsic calibration:
+   wheel_calib_ext: true
+   ```
+2. Place a `wheel_config.yaml` next to `estimator_config.yaml`. Ready-made examples are in `config/zed2i/` and `config/kaist/`. At minimum, set:
+   ```yaml
+   wheel:
+     topic: "/odom"        # your odometry topic
+     noise_v: 0.1          # forward velocity noise (m/s/sqrt(Hz))
+     noise_w: 0.05         # yaw rate noise (rad/s/sqrt(Hz))
+     noise_p: 0.5          # near-zero axes (angular.x/y, linear.y/z)
+     T_imu_wheel:          # 4×4 rigid transform: IMU frame → wheel odometry frame
+       - [1.0, 0.0, 0.0, 0.07]
+       - [0.0, 1.0, 0.0, 0.0]
+       - [0.0, 0.0, 1.0, -1.7]
+       - [0.0, 0.0, 0.0, 1.0]
+   ```
+3. Launch as usual:
+   ```
+   ros2 launch ov_msckf subscribe.launch.py
+   ```
 
 ### Tuning tips
 
 | Parameter | Effect |
 |---|---|
 | `noise_v` / `noise_w` | Higher → trust wheel less. Start around `0.05`; increase if wheel slip is expected |
-| `chi2_mult` | Chi-squared gate multiplier. Increase to be more permissive with outliers |
-| `T_imu_wheel` | Must match physical mounting. Rotation part is critical — use Kalibr or manual measurement |
-| `wheel_calib_ext` | Online extrinsic calibration; needs sufficient motion excitation to converge |
+| `noise_p` | Noise for near-zero axes (Ackermann constraint). Typically `0.1`–`0.5` |
+| `chi2_mult` | Chi-squared gate multiplier. Increase (e.g. `10`–`15`) to accept noisier measurements |
+| `T_imu_wheel` | Must match physical mounting. The rotation part is critical — use Kalibr or direct measurement |
+| `wheel_calib_ext` | Online extrinsic calibration; needs sufficient translational and rotational excitation to converge |
+| `do_turn_detection` | Set `true` for Ackermann robots to skip updates during sharp turns |
 
 ---
 
@@ -92,6 +119,11 @@ details on what the system supports.
 * Sliding window visual-inertial MSCKF
 * Modular covariance type system
 * Comprehensive documentation and derivations
+* **Wheel odometry EKF update** *(this fork)*
+    * RK4 preintegration between clone times
+    * Ackermann and differential-drive support
+    * Pure-rotation detection and chi2 outlier gating
+    * Optional online IMU-to-wheel extrinsic calibration
 * Extendable visual-inertial simulator
     * On manifold SE(3) b-spline
     * Arbitrary number of cameras
@@ -210,5 +242,3 @@ following:
 
 The codebase and documentation is licensed under the [GNU General Public License v3 (GPL-3)](https://www.gnu.org/licenses/gpl-3.0.txt).
 You must preserve the copyright and license notices in your derivative work and make available the complete source code with modifications under the same license ([see this](https://choosealicense.com/licenses/gpl-3.0/); this is not legal advice).
-
-
