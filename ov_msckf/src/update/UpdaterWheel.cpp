@@ -4,6 +4,8 @@
 #include "state/StateHelper.h"
 #include "utils/sensor_data.h"
 
+#include <boost/math/distributions/chi_squared.hpp>
+
 using namespace ov_msckf;
 using namespace ov_core;
 using namespace Eigen;
@@ -14,6 +16,12 @@ UpdaterWheel::UpdaterWheel(std::shared_ptr<State> state) : state(state) {
     delta_p.setZero();
     delta_R.setIdentity();
     covariance.setZero();
+
+    // Precompute chi2 95% thresholds (same as UpdaterMSCKF)
+    for (int i = 1; i < 500; i++) {
+        boost::math::chi_squared chi_squared_dist(i);
+        chi_squared_table[i] = boost::math::quantile(chi_squared_dist, 0.95);
+    }
 }
 
 
@@ -42,6 +50,8 @@ void UpdaterWheel::try_update() {
         return;
     }
 
+    double newest_clone_time = state->_clones_IMU.rbegin()->first;
+
     for (auto it = state->_clones_IMU.begin(); it != state->_clones_IMU.end(); ++it) {
         if (it->first <= last_updated_clone_time)
             continue;
@@ -50,7 +60,13 @@ void UpdaterWheel::try_update() {
                     last_updated_clone_time, it->first);
 
         if (!update(last_updated_clone_time, it->first)) {
-            PRINT_DEBUG("[WHEEL] try_update: Update failed, stopping\n");
+            PRINT_DEBUG("[WHEEL] try_update: Update failed\n");
+            // En yeni pencere için veri henüz gelmemiş olabilir — bekle.
+            // Eski pencereler için veri kalıcı olarak eksikse takılmamak adına atla.
+            if (it->first < newest_clone_time) {
+                last_updated_clone_time = it->first;
+                continue;
+            }
             break;
         }
     }
@@ -62,6 +78,22 @@ bool UpdaterWheel::update(double time0, double time1) {
     if (!select_odometry_data(time0, time1, data_vec) || data_vec.size() < 2) {
         PRINT_DEBUG("[WHEEL]: Not enough odometry measurements between %.3f and %.3f\n", time0, time1);
         return false;
+    }
+
+    // Turn detection: penceredeki herhangi bir ölçümde yüksek açısal hız varsa atla.
+    // NOT: try_update'teki eski kontrol odometry_data.back() kullanıyordu — bu, şu anki
+    // mesajın pencerenin dışında olmasına rağmen tüm güncellemeleri blokluyordu.
+    if (turn_detection_enabled) {
+        for (const auto& d : data_vec) {
+            if (d.angular_velocity.norm() > turn_ang_threshold) {
+                last_was_pure_rotation = true;
+                PRINT_DEBUG("[WHEEL] Turn detected in window [%.3f,%.3f] w=%.3f > %.3f — skipping\n",
+                            time0, time1, d.angular_velocity.norm(), turn_ang_threshold);
+                last_updated_clone_time = time1;
+                return true;
+            }
+        }
+        last_was_pure_rotation = false;
     }
 
     // Reset preintegration — always starts from identity/zero
@@ -104,6 +136,27 @@ bool UpdaterWheel::update(double time0, double time1) {
                 S_check.trace(), S_check.determinant());
 
 
+    // Chi2 outlier rejection — same pattern as UpdaterMSCKF / MINS Chi2Check
+    MatrixXd P_marg_chi2 = StateHelper::get_marginal_covariance(state, x_order);
+    MatrixXd S = H * P_marg_chi2 * H.transpose() + covariance;
+    double chi2 = res.dot(S.llt().solve(res));
+
+    double chi2_check;
+    if (res.rows() < 500) {
+        chi2_check = chi_squared_table[res.rows()];
+    } else {
+        boost::math::chi_squared chi_squared_dist(res.rows());
+        chi2_check = boost::math::quantile(chi_squared_dist, 0.95);
+    }
+
+    if (chi2 > chi2_mult * chi2_check) {
+        PRINT_WARNING(YELLOW "[WHEEL] Chi2 FAILED: %.3f > %.3f (mult=%.1f, dof=%d) — skipping\n" RESET,
+                      chi2, chi2_mult * chi2_check, chi2_mult, (int)res.rows());
+        last_updated_clone_time = time1;
+        return true;
+    }
+    PRINT_DEBUG("[WHEEL] Chi2 passed: %.3f < %.3f\n", chi2, chi2_mult * chi2_check);
+    PRINT_INFO("[WHEEL] EKFUpdate ÇAĞRILDI count=%d\n", ++update_count);
     StateHelper::EKFUpdate(state, x_order, H, res, covariance);
 
 
@@ -274,16 +327,25 @@ void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, cons
 
     Matrix<double, 6, 6> F = Matrix<double, 6, 6>::Zero();
     F.block<3,3>(0, 0) = R_new * R0.transpose();
-    F.block<3,3>(3, 0) = -skew_x(new_p - p0);   // NOTE: no extra R0^T here (local frame)
+    F.block<3,3>(3, 0) = -R0.transpose() * skew_x(new_p - p0);
     F.block<3,3>(3, 3) = Matrix3d::Identity();
 
     Matrix<double, 6, 6> G = Matrix<double, 6, 6>::Zero();
     G.block<3,3>(0, 0) = Matrix3d::Identity() * dt;  // rotation noise
     G.block<3,3>(3, 3) = R0.transpose() * dt;         // velocity noise in body frame
 
+    // Anisotropic noise for ackermann drive (matches MINS Wheel3DAng pattern):
+    //   angular.z  (yaw rate, encoder-derived)   → noise_gyro
+    //   angular.x/y (roll/pitch rate, ≈0)         → noise_pos  (tight constraint)
+    //   linear.x   (forward velocity, encoder)    → noise_vel
+    //   linear.y/z (lateral/vertical slip, ≈0)    → noise_pos  (tight constraint)
     Matrix<double, 6, 6> Q = Matrix<double, 6, 6>::Zero();
-    Q.block<3,3>(0, 0) = (noise_gyro * noise_gyro / dt) * Matrix3d::Identity();
-    Q.block<3,3>(3, 3) = (noise_vel  * noise_vel  / dt) * Matrix3d::Identity();
+    Q(0, 0) = (noise_pos  * noise_pos  / dt);  // angular.x
+    Q(1, 1) = (noise_pos  * noise_pos  / dt);  // angular.y
+    Q(2, 2) = (noise_gyro * noise_gyro / dt);  // angular.z ← yaw rate
+    Q(3, 3) = (noise_vel  * noise_vel  / dt);  // linear.x  ← forward
+    Q(4, 4) = (noise_pos  * noise_pos  / dt);  // linear.y
+    Q(5, 5) = (noise_pos  * noise_pos  / dt);  // linear.z
 
     covariance = F * covariance * F.transpose() + G * Q * G.transpose();
     covariance = 0.5 * (covariance + covariance.transpose());  // enforce symmetry
@@ -310,11 +372,12 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     PRINT_DEBUG("[WHEEL] clone0 size=%d id=%d, clone1 size=%d id=%d\n",
                 (int)clone0->size(), (int)clone0->id(),
                 (int)clone1->size(), (int)clone1->id());
-    // Extrinsics: R_ItoO rotates vectors from IMU frame to Odometry frame
-    //             p_IinO is the position of IMU origin expressed in Odometry frame
-    Matrix3d R_ItoO = T_imu_odom.block<3,3>(0,0);
-    Vector3d p_IinO = T_imu_odom.block<3,1>(0,3);
-    Vector3d p_OinI = -R_ItoO.transpose() * p_IinO;  // position of O origin in IMU frame
+    // T_imu_wheel = [R_OtoI | p_OinI ; 0 0 0 1]  ("from wheel to IMU", standard SE3)
+    //   R_OtoI  : rotation from wheel/odometry frame to IMU frame
+    //   p_OinI  : position of wheel/odometry origin in IMU frame (translation column)
+    Matrix3d R_OtoI = T_imu_odom.block<3,3>(0,0);
+    Matrix3d R_ItoO = R_OtoI.transpose();   // rotation from IMU to odometry frame
+    Vector3d p_OinI = T_imu_odom.block<3,1>(0,3);  // wheel origin in IMU frame, read directly
 
 
     PRINT_DEBUG("[WHEEL] R_ItoO:\n[%.3f %.3f %.3f]\n[%.3f %.3f %.3f]\n[%.3f %.3f %.3f]\n",
@@ -406,7 +469,7 @@ bool UpdaterWheel::compute_linear_system(MatrixXd& H, VectorXd& res,
     // Position Jacobians (directly match MINS dzp_dth0, dzp_dp0, dzp_dth1, dzp_dp1)
     // Note: p_I1inI0 = R_GtoI0 * (p_I1inG - p_I0inG)
     Vector3d p_I1inI0 = R_GtoI0 * (p_I1inG - p_I0inG);
-    Matrix3d dzp_dth0 =  R_ItoO * skew_x(p_I1inI0 + R_I0toI1.transpose() * p_OinI - p_OinI);
+    Matrix3d dzp_dth0 =  R_ItoO * skew_x(p_I1inI0 + R_I0toI1.transpose() * p_OinI);
     Matrix3d dzp_dp0  = -R_ItoO * R_GtoI0;
     Matrix3d dzp_dth1 = -R_ItoO * R_I0toI1.transpose() * skew_x(p_OinI);
     Matrix3d dzp_dp1  =  R_ItoO * R_GtoI0;

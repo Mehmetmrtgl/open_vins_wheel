@@ -1,0 +1,20 @@
+%YAML:1.0 # need to specify the file type at the top!
+
+wheel:
+  noise_w: 0.05  # yaw rate noise — angular.z (rad/s/sqrt(Hz))
+  noise_v: 0.5  # forward velocity noise — linear.x (m/s/sqrt(Hz))
+  noise_p: 0.5  # near-zero axes: angular.x/y, linear.y/z (ackermann constraint)
+  chi2_mult: 10
+ 
+  topic: "/odom"  # published by ros2_odometry_node (ackermann, /encoder_count → /odom)
+  do_calib_ext: false
+
+
+  do_turn_detection: false
+  turn_ang_threshold: 0.2   # rad/s (~11 deg/s)
+
+  T_imu_wheel:
+    - [1.0, 0.0, 0.0, 0.07]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, -1.7]
+    - [0.0, 0.0, 0.0, 1.0]

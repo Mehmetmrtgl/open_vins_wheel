@@ -23,6 +23,7 @@
 
 #include "Feature.h"
 #include "utils/print.h"
+#include <algorithm>
 
 using namespace ov_core;
 
@@ -118,10 +119,11 @@ std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_not_containing_n
     }
   }
 
-  // Debugging
-  // PRINT_DEBUG("feature db size = %u\n", features_idlookup.size())
+  // Sort by feature ID so MSCKF/SLAM update order is deterministic across runs
+  // (unordered_map iteration order varies with bucket layout, which is affected by ASLR)
+  std::sort(feats_old.begin(), feats_old.end(),
+            [](const std::shared_ptr<Feature> &a, const std::shared_ptr<Feature> &b) { return a->featid < b->featid; });
 
-  // Return the old features
   return feats_old;
 }
 
@@ -159,10 +161,9 @@ std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_containing_older
     }
   }
 
-  // Debugging
-  // PRINT_DEBUG("feature db size = %u\n", features_idlookup.size())
+  std::sort(feats_old.begin(), feats_old.end(),
+            [](const std::shared_ptr<Feature> &a, const std::shared_ptr<Feature> &b) { return a->featid < b->featid; });
 
-  // Return the old features
   return feats_old;
 }
 
@@ -200,11 +201,9 @@ std::vector<std::shared_ptr<Feature>> FeatureDatabase::features_containing(doubl
     }
   }
 
-  // Debugging
-  // PRINT_DEBUG("feature db size = %u\n", features_idlookup.size())
-  // PRINT_DEBUG("return vector = %u\n", feats_has_timestamp.size())
+  std::sort(feats_has_timestamp.begin(), feats_has_timestamp.end(),
+            [](const std::shared_ptr<Feature> &a, const std::shared_ptr<Feature> &b) { return a->featid < b->featid; });
 
-  // Return the features
   return feats_has_timestamp;
 }
 

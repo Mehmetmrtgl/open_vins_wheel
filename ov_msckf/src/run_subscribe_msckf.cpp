@@ -82,7 +82,9 @@ int main(int argc, char **argv) {
   // Create our VIO system
   VioManagerOptions params;
   params.print_and_load(parser);
-  params.use_multi_threading_subs = true;
+  params.use_multi_threading_subs = false;  // join processing thread → deterministic ordering
+  params.use_multi_threading_pubs = false;  // no async image-publish thread racing the filter
+  params.num_opencv_threads = 1;            // setNumThreads(1) forces serial path; 0 is a TBB no-op
   sys = std::make_shared<VioManager>(params);
 #if ROS_AVAILABLE == 1
   viz = std::make_shared<ROS1Visualizer>(nh, sys);
@@ -107,7 +109,7 @@ int main(int argc, char **argv) {
   ros::waitForShutdown();
 #elif ROS_AVAILABLE == 2
   // rclcpp::spin(node);
-  rclcpp::executors::MultiThreadedExecutor executor;
+  rclcpp::executors::SingleThreadedExecutor executor;  // serialises all callbacks → reproducible
   executor.add_node(node);
   executor.spin();
 #endif

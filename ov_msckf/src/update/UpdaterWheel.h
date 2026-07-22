@@ -6,6 +6,7 @@
 #include <vector>
 #include <mutex>
 #include <deque>
+#include <boost/math/distributions/chi_squared.hpp>
 
 #include "state/State.h"
 #include "types/Type.h"
@@ -56,10 +57,21 @@ public:
      * @param gyro_noise Gyroscope noise (rad/s)
      * @param vel_noise Velocity noise (m/s)
      */
-    void set_noise(double gyro_noise, double vel_noise) {
+    void set_noise(double gyro_noise, double vel_noise, double pos_noise) {
         noise_gyro = gyro_noise;
-        noise_vel = vel_noise;
-        PRINT_INFO("[WHEEL] Noise params SET: gyro=%.4f, vel=%.4f\n", noise_gyro, noise_vel);
+        noise_vel  = vel_noise;
+        noise_pos  = pos_noise;
+        PRINT_INFO("[WHEEL] Noise SET: w=%.4f (ang.z)  v=%.4f (lin.x)  p=%.4f (near-zero axes)\n",
+                   noise_gyro, noise_vel, noise_pos);
+    }
+
+    void set_chi2_mult(double mult) { chi2_mult = mult; }
+
+    void set_turn_detection(bool enable, double threshold) {
+        turn_detection_enabled = enable;
+        turn_ang_threshold     = threshold;
+        PRINT_INFO("[WHEEL] Turn detection: %s (threshold=%.3f rad/s)\n",
+                   enable ? "ON" : "OFF", threshold);
     }
 
 private:
@@ -193,14 +205,24 @@ private:
     /// Extrinsic calibration (IMU to Odometry)
     Eigen::Matrix4d T_imu_odom = Eigen::Matrix4d::Identity();
 
-    /// Noise parameters
-    double noise_gyro = 0.2;
-    double noise_vel = 0.5;
+    /// Noise parameters (ackermann-specific)
+    double noise_gyro = 0.2;  ///< angular.z (yaw rate from wheels)
+    double noise_vel  = 0.5;  ///< linear.x  (forward velocity from encoder)
+    double noise_pos  = 0.1;  ///< near-zero axes: angular.x/y, linear.y/z
 
-    /// Pure rotation detection parameters
-    double zvl_rotation_threshold = 0.1;   ///< min angular velocity to trigger (rad/s)
-    double zvl_velocity_ratio = 0.05;      ///< max v/w ratio to be considered pure rotation (m/rad)
-    bool last_was_pure_rotation = false;   ///< whether last check detected pure rotation
+    /// Chi2 multiplier for outlier rejection (same as MINS/UpdaterMSCKF)
+    double chi2_mult = 15.0;
+
+    /// Chi2 95% lookup table, indexed by DOF (precomputed in constructor via boost)
+    std::map<int, double> chi_squared_table;
+
+    /// Turn detection (config-driven)
+    bool   turn_detection_enabled = false;
+    double turn_ang_threshold     = 0.3;   ///< rad/s — from wheel_config.yaml
+    bool   last_was_pure_rotation = false;
+
+    /// Counts successful EKF updates (diagnostic only)
+    int update_count = 0;
 
 };
 

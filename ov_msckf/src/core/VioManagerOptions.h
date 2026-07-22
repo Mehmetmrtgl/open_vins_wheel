@@ -131,7 +131,10 @@ struct VioManagerOptions {
           parser->parse_external("relative_config_wheel", "wheel", "topic", wheel_options.topic);
           parser->parse_external("relative_config_wheel", "wheel", "noise_v", wheel_options.noise_v);
           parser->parse_external("relative_config_wheel", "wheel", "noise_w", wheel_options.noise_w);
+          parser->parse_external("relative_config_wheel", "wheel", "noise_p", wheel_options.noise_p);
           parser->parse_external("relative_config_wheel", "wheel", "chi2_mult", wheel_options.chi2_mult);
+          parser->parse_external("relative_config_wheel", "wheel", "do_turn_detection", wheel_options.do_turn_detection);
+          parser->parse_external("relative_config_wheel", "wheel", "turn_ang_threshold", wheel_options.turn_ang_threshold);
 
           parser->parse_external("relative_config_wheel", "wheel", "T_imu_wheel", wheel_options.T_imu_wheel);
       }
