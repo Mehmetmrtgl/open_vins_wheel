@@ -1,9 +1,7 @@
 name: ROS Free Workflow
 
 on:
-  push:
-    branches: [ master, feature/** ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build:

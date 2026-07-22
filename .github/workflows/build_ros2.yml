@@ -1,9 +1,7 @@
 name: ROS 2 Workflow
 
 on:
-  push:
-    branches: [ master, feature/** ]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   build_1804:
