@@ -26,8 +26,6 @@ The preintegration approach is inspired by [MINS](https://github.com/rpng/MINS) 
    ```yaml
    wheel_odometry: true
    relative_config_wheel: "wheel_config.yaml"
-   # optional — online extrinsic calibration:
-   wheel_calib_ext: true
    ```
 2. Place a `wheel_config.yaml` next to `estimator_config.yaml`. Ready-made examples are in `config/zed2i/` and `config/kaist/`. At minimum, set:
    ```yaml
@@ -42,9 +40,9 @@ The preintegration approach is inspired by [MINS](https://github.com/rpng/MINS) 
        - [0.0, 0.0, 1.0, -1.7]
        - [0.0, 0.0, 0.0, 1.0]
    ```
-3. Launch as usual:
+3. Launch:
    ```
-   ros2 launch ov_msckf subscribe.launch.py
+   ros2 launch ov_msckf_wheel subscribe.launch.py config:=zedx
    ```
 
 ### Tuning tips
