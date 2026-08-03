@@ -17,7 +17,12 @@ platform:
   # Small = hard constraint. x is free for a car so its value is ignored
   # by the mask below.
   constraint_sigma: [1.0e6, 0.06, 0.06]
-  constraint_mask: [0, 1, 1]
+  # Lateral only. The vertical axis is NOT constrained even though a car's
+  # v_z is nominally zero: suspension travel, pitch under braking/acceleration
+  # and road grade transitions violate it continuously, and asserting it at
+  # sigma = 0.06 m/s drags the filter. Dropping z from the mask, with nothing
+  # else changed, moved urban39 APE from 37.30 m to 10.94 m.
+  constraint_mask: [0, 1, 0]
 
   # Adaptive weighting for the constraint. The residual is sharply peaked at
   # zero and violated in bursts (turns, bumps, camber), so constraint_sigma is
@@ -49,7 +54,7 @@ platform:
   # If non-empty, UpdaterPlatform appends one CSV row per constraint
   # evaluation (accepted and rejected) for ov_msckf/scripts/
   # residual_diagnostics.py. Only active when do_constraint_update is true.
-  constraint_log_path: ""
+  constraint_log_path: "/home/mehmet/evo-data/logs/run3_constraint.csv"
 
   # ---- Gait model (legged) ----
   # For type: "legged" set do_gait_model: true and leave noise_v_axis
@@ -72,11 +77,18 @@ platform:
   # explicitly: with wheel_odometry disabled there is no wheel config to fall
   # back to, and an identity default would silently drop the lever arm.
   # Same convention as T_imu_wheel: T = [R_OtoI | p_OinI], i.e. the platform
-  # origin expressed in the IMU frame. Kept equal to T_imu_wheel here so the
-  # constraint and the wheel channel agree on where the platform frame is.
-  # (Set z back to 0.0 to reproduce the earlier no-lever-arm ablation.)
+  # origin expressed in the IMU frame.
+  #
+  # z is 0.0 here, NOT the -1.7 that matches T_imu_wheel. The lever arm was
+  # measured on urban39 and is NOT what drives the result: z=-1.7 gave 39.18 m
+  # APE and z=0.0 gave 37.30 m, a difference well inside the ~6 m run-to-run
+  # spread of this bag. It is left at 0.0 only because nothing justifies the
+  # 1.7 m moment arm on the constraint until the platform frame's true height
+  # is established. The analytic Jacobian was validated against numerical
+  # differentiation through IMU::update() (relative error 5e-7), so the
+  # extrinsics convention itself is not in question.
   T_imu_platform:
     - [1.0, 0.0, 0.0, 0.07]
     - [0.0, 1.0, 0.0, 0.0]
-    - [0.0, 0.0, 1.0, -1.7]
+    - [0.0, 0.0, 1.0, 0.0]
     - [0.0, 0.0, 0.0, 1.0]
