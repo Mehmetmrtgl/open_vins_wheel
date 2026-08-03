@@ -1,0 +1,82 @@
+%YAML:1.0 # need to specify the file type at the top!
+
+platform:
+
+  # Morphology: "car" | "differential" | "legged" | "omni"
+  # Selecting a type applies sensible defaults; any key below overrides them.
+  type: "car"
+
+  # ---- Nonholonomic constraint (car / differential) ----
+  # Default OFF: with wheel odometry present the nonholonomic fact already
+  # flows through the wheel preintegration via the tightened noise_v_axis
+  # below, counted once per clone interval with a correct temporal model.
+  # The explicit pseudo-measurement remains available for control runs and
+  # for the no-wheel configuration.
+  do_constraint_update: true
+  # std-dev of the v=0 pseudo-measurement per body axis [x, y, z] (m/s).
+  # Small = hard constraint. x is free for a car so its value is ignored
+  # by the mask below.
+  constraint_sigma: [1.0e6, 0.06, 0.06]
+  constraint_mask: [0, 1, 1]
+
+  # Adaptive weighting for the constraint. The residual is sharply peaked at
+  # zero and violated in bursts (turns, bumps, camber), so constraint_sigma is
+  # set for the bulk and the correntropy weight softens the bursts.
+  # 1 Hz: bound how often the standing constraint is re-counted
+  constraint_min_dt: 0.2
+  do_constraint_adaptive: false
+  do_jacobian_check: false
+  constraint_corr_sigma: 1.5
+  constraint_corr_gain_min: 1.0e-3
+
+  # ---- Per-axis odometry measurement noise (replaces scalar noise_v/noise_w) ----
+  # This is where car morphology enters. The odometry stream reports
+  # v = [v_x, 0, 0]; the zeros on y and z ARE the nonholonomic constraint, so
+  # those axes are TIGHTENED below the legacy isotropic 0.5, and the sigma
+  # states how far true body velocity may depart from zero (tyre slip on y,
+  # suspension motion on z). Inflating them, as the previous shipped config
+  # effectively did through base_noise, removes the constraint information
+  # from the wheel channel (measured on urban39: 8.915 m -> 12.951 m APE).
+  noise_v_axis: [0.50, 0.15, 0.25]
+  noise_w_axis: [0.05, 0.05, 0.05]
+
+  # Adaptive machinery (correntropy, sliding-window R scale, gait) on the
+  # 6-dof wheel residual. OFF so the wheel update is exactly the legacy path
+  # except for the per-axis Q above; the adapt_R-only ablation measured
+  # 8.915 m -> 10.786 m, so leaving it on would contaminate the shaping result.
+  do_wheel_adaptive: false
+
+  # If non-empty, UpdaterPlatform appends one CSV row per constraint
+  # evaluation (accepted and rejected) for ov_msckf/scripts/
+  # residual_diagnostics.py. Only active when do_constraint_update is true.
+  constraint_log_path: ""
+
+  # ---- Gait model (legged) ----
+  # For type: "legged" set do_gait_model: true and leave noise_v_axis
+  # roughly isotropic; the oscillation is handled by periodicity detection,
+  # NOT by inflating noise.
+  do_gait_model: false
+  gait_freq_min: 0.5          # Hz, plausible gait band
+  gait_freq_max: 5.0
+  gait_periodicity_thresh: 0.55
+  gait_window: 128            # samples in the periodicity ring buffer
+
+  # ---- Per-axis adaptive (correntropy) parameters, adaptive-branch style ----
+  corr_sigma: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]   # [rot xyz | pos xyz]
+  corr_window: 75
+  corr_recent: 5
+  r_scale_min: 0.5
+  r_scale_max: 5.0
+
+  # Platform (body) frame the constraints are expressed in. Must be given
+  # explicitly: with wheel_odometry disabled there is no wheel config to fall
+  # back to, and an identity default would silently drop the lever arm.
+  # Same convention as T_imu_wheel: T = [R_OtoI | p_OinI], i.e. the platform
+  # origin expressed in the IMU frame. Kept equal to T_imu_wheel here so the
+  # constraint and the wheel channel agree on where the platform frame is.
+  # (Set z back to 0.0 to reproduce the earlier no-lever-arm ablation.)
+  T_imu_platform:
+    - [1.0, 0.0, 0.0, 0.07]
+    - [0.0, 1.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, -1.7]
+    - [0.0, 0.0, 0.0, 1.0]

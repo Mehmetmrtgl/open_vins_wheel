@@ -12,6 +12,9 @@
 #include "types/Type.h"
 #include "utils/sensor_data.h"
 
+#include "OptionsPlatform.h"
+#include "PlatformMotionModel.h"
+
 namespace ov_msckf {
 
 
@@ -74,7 +77,15 @@ public:
                    enable ? "ON" : "OFF", threshold);
     }
 
+    /// Attach the platform motion model (call from VioManager after construction).
+    /// nullptr keeps the legacy path: isotropic-per-role Q from noise_gyro /
+    /// noise_vel / noise_pos and a fixed R at the EKF update.
+    void set_platform(std::shared_ptr<PlatformMotionModel> model) { platform = model; }
+
 private:
+    /// Platform motion model; nullptr = legacy behaviour
+    std::shared_ptr<PlatformMotionModel> platform;
+
     /**
      * @brief Update state between two clone times
      * @param time0 Start time

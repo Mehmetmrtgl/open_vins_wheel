@@ -127,18 +127,28 @@ bool UpdaterWheel::update(double time0, double time1) {
     PRINT_DEBUG("[WHEEL] res=[%.4f,%.4f,%.4f | %.4f,%.4f,%.4f], cov_trace=%.6f\n",
                 res(0),res(1),res(2),res(3),res(4),res(5), covariance.trace());
 
+    // Platform-aware adaptive measurement covariance (per-axis correntropy +
+    // sliding-window R estimate + gait handling). Applied BEFORE the chi2 gate
+    // so the gate sees the same R the EKF will use: an inflated R already
+    // softens an outlier, and gating on the raw R would penalise it twice.
+    Matrix<double, 6, 6> R_eff = covariance;
+    if (platform != nullptr && res.rows() == 6) {
+        Matrix<double, 6, 1> res6 = res.head<6>();
+        platform->adapt_R(R_eff, res6);
+        platform->push_innovation(time1, res6);
+    }
 
     MatrixXd P_marg = StateHelper::get_marginal_covariance(state, x_order);
-    MatrixXd S_check = H * P_marg * H.transpose() + covariance;
+    MatrixXd S_check = H * P_marg * H.transpose() + R_eff;
     PRINT_DEBUG("[WHEEL] P_marg trace=%.6f, H*P*Ht trace=%.6f, R trace=%.6f\n",
-                P_marg.trace(), (H * P_marg * H.transpose()).trace(), covariance.trace());
+                P_marg.trace(), (H * P_marg * H.transpose()).trace(), R_eff.trace());
     PRINT_DEBUG("[WHEEL] S trace=%.6f, S det=%.6e\n",
                 S_check.trace(), S_check.determinant());
 
 
     // Chi2 outlier rejection — same pattern as UpdaterMSCKF / MINS Chi2Check
     MatrixXd P_marg_chi2 = StateHelper::get_marginal_covariance(state, x_order);
-    MatrixXd S = H * P_marg_chi2 * H.transpose() + covariance;
+    MatrixXd S = H * P_marg_chi2 * H.transpose() + R_eff;
     double chi2 = res.dot(S.llt().solve(res));
 
     double chi2_check;
@@ -156,8 +166,8 @@ bool UpdaterWheel::update(double time0, double time1) {
         return true;
     }
     PRINT_DEBUG("[WHEEL] Chi2 passed: %.3f < %.3f\n", chi2, chi2_mult * chi2_check);
-    PRINT_INFO("[WHEEL] EKFUpdate ÇAĞRILDI count=%d\n", ++update_count);
-    StateHelper::EKFUpdate(state, x_order, H, res, covariance);
+    PRINT_INFO("[WHEEL] EKFUpdate called count=%d\n", ++update_count);
+    StateHelper::EKFUpdate(state, x_order, H, res, R_eff);
 
 
     // EKFUpdate'ten SONRA residual'ı tekrar hesapla
@@ -334,18 +344,33 @@ void UpdaterWheel::preintegration_RK4(double dt, const OdometryData& data1, cons
     G.block<3,3>(0, 0) = Matrix3d::Identity() * dt;  // rotation noise
     G.block<3,3>(3, 3) = R0.transpose() * dt;         // velocity noise in body frame
 
-    // Anisotropic noise for ackermann drive (matches MINS Wheel3DAng pattern):
-    //   angular.z  (yaw rate, encoder-derived)   → noise_gyro
-    //   angular.x/y (roll/pitch rate, ≈0)         → noise_pos  (tight constraint)
-    //   linear.x   (forward velocity, encoder)    → noise_vel
-    //   linear.y/z (lateral/vertical slip, ≈0)    → noise_pos  (tight constraint)
-    Matrix<double, 6, 6> Q = Matrix<double, 6, 6>::Zero();
-    Q(0, 0) = (noise_pos  * noise_pos  / dt);  // angular.x
-    Q(1, 1) = (noise_pos  * noise_pos  / dt);  // angular.y
-    Q(2, 2) = (noise_gyro * noise_gyro / dt);  // angular.z ← yaw rate
-    Q(3, 3) = (noise_vel  * noise_vel  / dt);  // linear.x  ← forward
-    Q(4, 4) = (noise_pos  * noise_pos  / dt);  // linear.y
-    Q(5, 5) = (noise_pos  * noise_pos  / dt);  // linear.z
+    // Measurement noise on the odometry channel. Two ways of saying the same
+    // thing, and the platform model is the more general one:
+    //
+    //   platform ON  → Q = base_noise(dt), one sigma per body axis taken from
+    //                  noise_w_axis / noise_v_axis. This is where the vehicle's
+    //                  kinematics physically enter the filter: for a car the
+    //                  reported zeros on v_y / v_z are the nonholonomic
+    //                  constraint, so those axes are TIGHTENED, and a legged
+    //                  platform instead leaves them comparable to x.
+    //
+    //   platform OFF → the ackermann-specific scheme below (MINS Wheel3DAng
+    //                  pattern), which hard-codes the same idea for one
+    //                  morphology: encoder-derived yaw rate and forward
+    //                  velocity get their own sigma, the four near-zero axes
+    //                  share noise_pos.
+    Matrix<double, 6, 6> Q;
+    if (platform != nullptr) {
+        Q = platform->base_noise(dt);
+    } else {
+        Q.setZero();
+        Q(0, 0) = (noise_pos  * noise_pos  / dt);  // angular.x
+        Q(1, 1) = (noise_pos  * noise_pos  / dt);  // angular.y
+        Q(2, 2) = (noise_gyro * noise_gyro / dt);  // angular.z ← yaw rate
+        Q(3, 3) = (noise_vel  * noise_vel  / dt);  // linear.x  ← forward
+        Q(4, 4) = (noise_pos  * noise_pos  / dt);  // linear.y
+        Q(5, 5) = (noise_pos  * noise_pos  / dt);  // linear.z
+    }
 
     covariance = F * covariance * F.transpose() + G * Q * G.transpose();
     covariance = 0.5 * (covariance + covariance.transpose());  // enforce symmetry

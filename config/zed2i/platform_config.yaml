@@ -1,0 +1,37 @@
+%YAML:1.0 # need to specify the file type at the top!
+
+platform:
+
+  # Morphology: "car" | "differential" | "legged" | "omni"
+  # Selecting a type applies sensible defaults; any key below overrides them.
+  type: "car"
+
+  # ---- Nonholonomic constraint (car / differential) ----
+  do_constraint_update: true
+  # std-dev of the v=0 pseudo-measurement per body axis [x, y, z] (m/s).
+  # Small = hard constraint. x is free for a car so its value is ignored
+  # by the mask below.
+  constraint_sigma: [1.0e6, 0.05, 0.05]
+  constraint_mask: [0, 1, 1]
+
+  # ---- Per-axis odometry measurement noise (replaces scalar noise_v/noise_w) ----
+  # CAR: y/z linear channels are physically noise -> large sigma.
+  noise_v_axis: [0.10, 1.00, 1.00]
+  noise_w_axis: [0.05, 0.05, 0.05]
+
+  # ---- Gait model (legged) ----
+  # For type: "legged" set do_gait_model: true and leave noise_v_axis
+  # roughly isotropic; the oscillation is handled by periodicity detection,
+  # NOT by inflating noise.
+  do_gait_model: false
+  gait_freq_min: 0.5          # Hz, plausible gait band
+  gait_freq_max: 5.0
+  gait_periodicity_thresh: 0.55
+  gait_window: 128            # samples in the periodicity ring buffer
+
+  # ---- Per-axis adaptive (correntropy) parameters, adaptive-branch style ----
+  corr_sigma: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]   # [rot xyz | pos xyz]
+  corr_window: 75
+  corr_recent: 5
+  r_scale_min: 0.5
+  r_scale_max: 5.0

@@ -14,6 +14,7 @@ calib_imu_intrinsics: false # if imu intrinsics should be calibrated (rotation a
 calib_imu_g_sensitivity: false # if gyroscope gravity sensitivity (Tg) should be calibrated
 
 wheel_odometry : false
+platform_motion : true
 wheel_calib_ext : false
 wheel_calib_int : false
 wheel_calib_dt : false
@@ -120,6 +121,7 @@ use_mask: false
 relative_config_imu: "kalibr_imu_chain.yaml"
 relative_config_imucam: "kalibr_imucam_chain.yaml"
 relative_config_wheel: "wheel_config.yaml"
+relative_config_platform: "platform_config.yaml"
 
 
 

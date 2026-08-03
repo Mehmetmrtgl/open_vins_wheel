@@ -60,6 +60,11 @@ struct StateOptions {
 
   bool do_wheel_odometry = false;
 
+  /// Bool to enable the platform (robot morphology) motion model. Independent of
+  /// wheel odometry: what a platform can and cannot do kinematically is true
+  /// whether or not an odometry message ever arrives.
+  bool do_platform_motion = false;
+
   bool do_wheel_calib_ext = false;
 
   bool do_wheel_calib_int = false;
@@ -130,6 +135,8 @@ struct StateOptions {
       parser->parse_config("wheel_calib_int", do_wheel_calib_int);
       parser->parse_config("wheel_calib_dt", do_wheel_calib_dt);
       parser->parse_config("wheel_odometry", do_wheel_odometry);
+      // Optional so configs that predate the platform model keep loading.
+      parser->parse_config("platform_motion", do_platform_motion, false);
 
       // State parameters
       parser->parse_config("max_clones", max_clone_size);
@@ -187,6 +194,7 @@ struct StateOptions {
     PRINT_DEBUG("  - feat_rep_aruco: %s\n", ov_type::LandmarkRepresentation::as_string(feat_rep_aruco).c_str());
 
     PRINT_DEBUG("  - wheel_odometry: %d\n", do_wheel_odometry);
+    PRINT_DEBUG("  - platform_motion: %d\n", do_platform_motion);
     PRINT_DEBUG("  - wheel_calib_ext: %d\n", do_wheel_calib_ext);
     PRINT_DEBUG("  - wheel_calib_int: %d\n", do_wheel_calib_int);
     PRINT_DEBUG("  - wheel_calib_dt: %d\n", do_wheel_calib_dt);

@@ -67,6 +67,8 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterSLAM.cpp
         src/update/UpdaterZeroVelocity.cpp
         src/update/UpdaterWheel.cpp
+        src/update/UpdaterPlatform.cpp
+        src/update/PlatformMotionModel.cpp
 )
 list(APPEND LIBRARY_SOURCES src/ros/ROS2Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)
 file(GLOB_RECURSE LIBRARY_HEADERS "src/*.h")

@@ -169,9 +169,31 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
     updaterWheel->set_chi2_mult(params.wheel_options.chi2_mult);
     updaterWheel->set_turn_detection(params.wheel_options.do_turn_detection,
                                      params.wheel_options.turn_ang_threshold);
-    PRINT_INFO("UpdaterWheel initialized! noise_w=%.4f, noise_v=%.4f, p_IinO=[%.3f, %.3f, %.3f]\n",
+    PRINT_INFO("UpdaterWheel initialized! noise_w=%.4f, noise_v=%.4f, p_OinI=[%.3f, %.3f, %.3f]\n",
                params.wheel_options.noise_w, params.wheel_options.noise_v,
                params.wheel_options.T_imu_wheel(0,3), params.wheel_options.T_imu_wheel(1,3), params.wheel_options.T_imu_wheel(2,3));
+  }
+
+  // Platform motion model. Deliberately outside the wheel-odometry block: the
+  // kinematic knowledge holds on its own, so the constraint update must be
+  // available with or without an odometry stream. The per-axis noise shaping
+  // only has something to act on when a wheel measurement exists, so it is
+  // attached to the wheel updater only in that case.
+  if (params.state_options.do_platform_motion) {
+    platformModel = std::make_shared<PlatformMotionModel>(params.platform_options);
+    if (updaterWheel != nullptr) {
+      updaterWheel->set_platform(platformModel);
+      PRINT_INFO("PlatformMotionModel attached to UpdaterWheel! type=%d, do_wheel_adaptive=%d\n",
+                 (int)params.platform_options.type, (int)params.platform_options.do_wheel_adaptive);
+    }
+
+    if (params.platform_options.do_constraint_update) {
+      updaterPlatform = std::make_shared<UpdaterPlatform>(state, params.platform_options);
+      updaterPlatform->set_extrinsics(params.platform_options.T_imu_platform);
+      updaterPlatform->set_model(platformModel);
+      PRINT_INFO("UpdaterPlatform initialized! type=%d, wheel_odometry=%d\n",
+                 (int)params.platform_options.type, (int)params.state_options.do_wheel_odometry);
+    }
   }
 
 }
@@ -188,6 +210,10 @@ void VioManager::feed_measurement_imu(const ov_core::ImuData &message) {
     oldest_time = message.timestamp - params.init_options.init_window_time + state->_calib_dt_CAMtoIMU->value()(0) - 0.10;
   }
   propagator->feed_imu(message, oldest_time);
+
+  // Remember the latest raw gyro sample for the platform constraint update's lever-arm term
+  last_wm = message.wm;
+  have_last_wm = true;
 
   // Push back to our initializer
   if (!is_initialized_vio) {
@@ -384,10 +410,16 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
 
 
   if (is_initialized_vio && updaterWheel != nullptr) {
-      // Ana thread içindeyiz, State'e erişim güvenli.
+      // We are on the main thread here, so touching the state is safe.
       updaterWheel->try_update();
 
-      // Wheel update State'i değiştirdiği için cache'i geçersiz kılalım
+      // Wheel update modifies the state, so invalidate the propagator cache
+      propagator->invalidate_cache();
+  }
+
+  if (is_initialized_vio && updaterPlatform != nullptr && have_last_wm) {
+      updaterPlatform->try_update(last_wm);
+      // constraint update modifies the state, invalidate propagator cache
       propagator->invalidate_cache();
   }
   // If we have not reached max clones, we should just return...

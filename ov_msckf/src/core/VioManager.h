@@ -33,6 +33,8 @@
 
 #include "VioManagerOptions.h"
 #include "update/UpdaterWheel.h"
+#include "update/UpdaterPlatform.h"
+#include "update/PlatformMotionModel.h"
 
 namespace ov_core {
 struct ImuData;
@@ -216,6 +218,14 @@ protected:
 
   /// wheel updater
   std::shared_ptr<UpdaterWheel> updaterWheel;
+
+  /// platform-aware nonholonomic constraint updater and motion model
+  std::shared_ptr<UpdaterPlatform> updaterPlatform;
+  std::shared_ptr<PlatformMotionModel> platformModel;
+
+  /// Most recent raw gyro sample, needed for UpdaterPlatform's lever-arm term
+  Eigen::Vector3d last_wm = Eigen::Vector3d::Zero();
+  bool have_last_wm = false;
 
   /// This is the queue of measurement times that have come in since we starting doing initialization
   /// After we initialize, we will want to prop & update to the latest timestamp quickly
