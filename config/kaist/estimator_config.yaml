@@ -13,8 +13,8 @@ calib_cam_timeoffset: true # degenerate motion
 calib_imu_intrinsics: false
 calib_imu_g_sensitivity: false
 
-wheel_odometry : false
-platform_motion : false
+wheel_odometry : true
+platform_motion : true
 wheel_calib_ext : false
 wheel_calib_int : false
 wheel_calib_dt : false

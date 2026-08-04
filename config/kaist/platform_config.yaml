@@ -12,7 +12,7 @@ platform:
   # below, counted once per clone interval with a correct temporal model.
   # The explicit pseudo-measurement remains available for control runs and
   # for the no-wheel configuration.
-  do_constraint_update: true
+  do_constraint_update: false
   # std-dev of the v=0 pseudo-measurement per body axis [x, y, z] (m/s).
   # Small = hard constraint. x is free for a car so its value is ignored
   # by the mask below.
