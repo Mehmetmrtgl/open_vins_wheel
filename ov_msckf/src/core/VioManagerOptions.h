@@ -134,6 +134,30 @@ struct VioManagerOptions {
           parser->parse_external("relative_config_wheel", "wheel", "chi2_mult", wheel_options.chi2_mult);
 
           parser->parse_external("relative_config_wheel", "wheel", "T_imu_wheel", wheel_options.T_imu_wheel);
+
+          // Optional so wheel configs written before the per-axis noise model
+          // still load: noise_p defaults to the struct value and the axis
+          // vectors are then derived from the three ackermann sigmas.
+          parser->parse_external("relative_config_wheel", "wheel", "noise_p", wheel_options.noise_p, false);
+          parser->parse_external("relative_config_wheel", "wheel", "do_turn_detection",
+                                 wheel_options.do_turn_detection, false);
+          parser->parse_external("relative_config_wheel", "wheel", "turn_ang_threshold",
+                                 wheel_options.turn_ang_threshold, false);
+
+          // Lay the ackermann shorthand over the six body axes, then let an
+          // explicit per-axis block override it. Vector-valued keys go through
+          // std::vector: FileStorage has no native Eigen::Vector reader.
+          wheel_options.apply_scalar_defaults();
+
+          std::vector<double> w_noise_w_axis = {wheel_options.noise_w_axis(0), wheel_options.noise_w_axis(1),
+                                                wheel_options.noise_w_axis(2)};
+          parser->parse_external("relative_config_wheel", "wheel", "noise_w_axis", w_noise_w_axis, false);
+          wheel_options.noise_w_axis = Eigen::Vector3d(w_noise_w_axis.at(0), w_noise_w_axis.at(1), w_noise_w_axis.at(2));
+
+          std::vector<double> w_noise_v_axis = {wheel_options.noise_v_axis(0), wheel_options.noise_v_axis(1),
+                                                wheel_options.noise_v_axis(2)};
+          parser->parse_external("relative_config_wheel", "wheel", "noise_v_axis", w_noise_v_axis, false);
+          wheel_options.noise_v_axis = Eigen::Vector3d(w_noise_v_axis.at(0), w_noise_v_axis.at(1), w_noise_v_axis.at(2));
       }
 
     }
@@ -148,9 +172,13 @@ struct VioManagerOptions {
 
     PRINT_DEBUG("  - wheel_options:\n");
     PRINT_DEBUG("    - topic: %s\n", wheel_options.topic.c_str());
-    PRINT_DEBUG("    - noise_v: %.5f\n", wheel_options.noise_v);
-    PRINT_DEBUG("    - noise_w: %.5f\n", wheel_options.noise_w);
+    PRINT_DEBUG("    - noise_w_axis: [%.5f %.5f %.5f]\n",
+                wheel_options.noise_w_axis(0), wheel_options.noise_w_axis(1), wheel_options.noise_w_axis(2));
+    PRINT_DEBUG("    - noise_v_axis: [%.5f %.5f %.5f]\n",
+                wheel_options.noise_v_axis(0), wheel_options.noise_v_axis(1), wheel_options.noise_v_axis(2));
     PRINT_DEBUG("    - chi2_mult: %.2f\n", wheel_options.chi2_mult);
+    PRINT_DEBUG("    - turn detection: %d (%.3f rad/s)\n",
+                (int)wheel_options.do_turn_detection, wheel_options.turn_ang_threshold);
 
 
     PRINT_DEBUG("    - T_imu_wheel:\n");

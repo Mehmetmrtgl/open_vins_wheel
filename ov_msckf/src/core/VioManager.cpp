@@ -166,9 +166,11 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
   if (params.state_options.do_wheel_odometry) {
     updaterWheel = std::make_shared<UpdaterWheel>(state);
     updaterWheel->set_extrinsics(params.wheel_options.T_imu_wheel);
-    updaterWheel->set_noise(params.wheel_options.noise_w, params.wheel_options.noise_v);
-    PRINT_INFO("UpdaterWheel initialized! noise_w=%.4f, noise_v=%.4f, p_IinO=[%.3f, %.3f, %.3f]\n",
-               params.wheel_options.noise_w, params.wheel_options.noise_v,
+    updaterWheel->set_noise_axis(params.wheel_options.noise_w_axis, params.wheel_options.noise_v_axis);
+    updaterWheel->set_chi2_mult(params.wheel_options.chi2_mult);
+    updaterWheel->set_turn_detection(params.wheel_options.do_turn_detection,
+                                     params.wheel_options.turn_ang_threshold);
+    PRINT_INFO("UpdaterWheel initialized! p_OinI=[%.3f, %.3f, %.3f]\n",
                params.wheel_options.T_imu_wheel(0,3), params.wheel_options.T_imu_wheel(1,3), params.wheel_options.T_imu_wheel(2,3));
   }
 

@@ -6,6 +6,7 @@
 #include <vector>
 #include <mutex>
 #include <deque>
+#include <boost/math/distributions/chi_squared.hpp>
 
 #include "state/State.h"
 #include "types/Type.h"
@@ -16,8 +17,14 @@ namespace ov_msckf {
 
 /**
  * @brief Wheel odometry updater for OpenVINS
- * * This class integrates wheel odometry measurements to update the IMU state.
+ *
+ * This class integrates wheel odometry measurements to update the IMU state.
  * It uses preintegration between two clone times and performs EKF update.
+ *
+ * Self-contained: it owns its own noise model and knows nothing about the
+ * platform motion model. The two are separate integrations of separate
+ * information — an odometry stream, and the vehicle's kinematics — and either
+ * runs with or without the other.
  */
 class UpdaterWheel {
 public:
@@ -56,10 +63,30 @@ public:
      * @param gyro_noise Gyroscope noise (rad/s)
      * @param vel_noise Velocity noise (m/s)
      */
-    void set_noise(double gyro_noise, double vel_noise) {
-        noise_gyro = gyro_noise;
-        noise_vel = vel_noise;
-        PRINT_INFO("[WHEEL] Noise params SET: gyro=%.4f, vel=%.4f\n", noise_gyro, noise_vel);
+    /**
+     * @brief Set the per-axis body-frame measurement noise for the odometry
+     *        channel. This is where the vehicle's kinematics enter the wheel
+     *        update: the axes the odometry reports as zero carry the
+     *        constraint, so their sigma says how far the true body velocity may
+     *        depart from it, not how noisy a dead channel is.
+     * @param w_axis Angular sigmas [x, y, z] (rad/s)
+     * @param v_axis Linear sigmas  [x, y, z] (m/s)
+     */
+    void set_noise_axis(const Eigen::Vector3d &w_axis, const Eigen::Vector3d &v_axis) {
+        noise_w_axis = w_axis;
+        noise_v_axis = v_axis;
+        PRINT_INFO("[WHEEL] Noise SET: w=[%.4f %.4f %.4f]  v=[%.4f %.4f %.4f]\n",
+                   noise_w_axis(0), noise_w_axis(1), noise_w_axis(2),
+                   noise_v_axis(0), noise_v_axis(1), noise_v_axis(2));
+    }
+
+    void set_chi2_mult(double mult) { chi2_mult = mult; }
+
+    void set_turn_detection(bool enable, double threshold) {
+        turn_detection_enabled = enable;
+        turn_ang_threshold     = threshold;
+        PRINT_INFO("[WHEEL] Turn detection: %s (threshold=%.3f rad/s)\n",
+                   enable ? "ON" : "OFF", threshold);
     }
 
 private:
@@ -193,14 +220,23 @@ private:
     /// Extrinsic calibration (IMU to Odometry)
     Eigen::Matrix4d T_imu_odom = Eigen::Matrix4d::Identity();
 
-    /// Noise parameters
-    double noise_gyro = 0.2;
-    double noise_vel = 0.5;
+    /// Per-axis body-frame measurement noise for the odometry channel
+    Eigen::Vector3d noise_w_axis = Eigen::Vector3d(0.1, 0.1, 0.2);  ///< angular x, y, z
+    Eigen::Vector3d noise_v_axis = Eigen::Vector3d(0.5, 0.1, 0.1);  ///< linear x, y, z
 
-    /// Pure rotation detection parameters
-    double zvl_rotation_threshold = 0.1;   ///< min angular velocity to trigger (rad/s)
-    double zvl_velocity_ratio = 0.05;      ///< max v/w ratio to be considered pure rotation (m/rad)
-    bool last_was_pure_rotation = false;   ///< whether last check detected pure rotation
+    /// Chi2 multiplier for outlier rejection (same as MINS/UpdaterMSCKF)
+    double chi2_mult = 15.0;
+
+    /// Chi2 95% lookup table, indexed by DOF (precomputed in constructor via boost)
+    std::map<int, double> chi_squared_table;
+
+    /// Turn detection (config-driven)
+    bool   turn_detection_enabled = false;
+    double turn_ang_threshold     = 0.3;   ///< rad/s — from wheel_config.yaml
+    bool   last_was_pure_rotation = false;
+
+    /// Counts successful EKF updates (diagnostic only)
+    int update_count = 0;
 
 };
 
