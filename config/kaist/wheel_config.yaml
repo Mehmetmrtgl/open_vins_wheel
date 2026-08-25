@@ -1,11 +1,33 @@
 %YAML:1.0 # need to specify the file type at the top!
 
 wheel:
+  # Ackermann shorthand: the three roles an ackermann odometry message has.
+  # Used to seed the six per-axis sigmas below.
   noise_w: 0.05  # yaw rate noise — angular.z (rad/s/sqrt(Hz))
   noise_v: 0.5  # forward velocity noise — linear.x (m/s/sqrt(Hz))
   noise_p: 0.5  # near-zero axes: angular.x/y, linear.y/z (ackermann constraint)
+
+  # Per-axis body-frame noise, what the preintegration actually consumes.
+  # Overrides the shorthand above. Order: [x, y, z].
+  #
+  # The odometry stream reports v = [v_x, 0, 0]; the zeros on y and z are not
+  # dead channels, they carry the nonholonomic fact, and the sigma says how far
+  # the true body velocity may depart from zero (tyre slip on y, suspension
+  # motion on z).
+  #
+  # y is 0.5 here, NOT the 0.15 this channel was tuned to alone. With
+  # platform_motion on, v_y = 0 now reaches the filter twice: once through this
+  # preintegration and once through the platform update, which is the same
+  # standing fact counted as two independent observations and would drive the
+  # covariance below the truth. Loosening y hands the lateral constraint to the
+  # platform update, where the correntropy weighting can soften it on turns,
+  # bumps and camber instead of asserting it at a fixed sigma. z stays tight:
+  # nothing else asserts it.
+  noise_w_axis: [0.05, 0.05, 0.05]
+  noise_v_axis: [0.50, 0.50, 0.25]
+
   chi2_mult: 10
- 
+
   topic: "/odom"  # published by ros2_odometry_node (ackermann, /encoder_count → /odom)
   do_calib_ext: false
 

@@ -90,6 +90,7 @@ list(APPEND LIBRARY_SOURCES
         src/update/UpdaterWheel.cpp
         src/update/UpdaterPlatform.cpp
         src/update/PlatformMotionModel.cpp
+        src/update/CorrentropyFilter.cpp
 )
 if (catkin_FOUND AND ENABLE_ROS)
     list(APPEND LIBRARY_SOURCES src/ros/ROS1Visualizer.cpp src/ros/ROSVisualizerHelper.cpp)

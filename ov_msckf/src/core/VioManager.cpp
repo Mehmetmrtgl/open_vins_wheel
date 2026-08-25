@@ -162,37 +162,32 @@ VioManager::VioManager(VioManagerOptions &params_) : thread_init_running(false),
                                                         params.zupt_noise_multiplier, params.zupt_max_disparity);
   }
 
+  // Wheel odometry. Owns its own noise model end to end.
   if (params.state_options.do_wheel_odometry) {
     updaterWheel = std::make_shared<UpdaterWheel>(state);
     updaterWheel->set_extrinsics(params.wheel_options.T_imu_wheel);
-    updaterWheel->set_noise(params.wheel_options.noise_w, params.wheel_options.noise_v, params.wheel_options.noise_p);
+    updaterWheel->set_noise_axis(params.wheel_options.noise_w_axis, params.wheel_options.noise_v_axis);
     updaterWheel->set_chi2_mult(params.wheel_options.chi2_mult);
     updaterWheel->set_turn_detection(params.wheel_options.do_turn_detection,
                                      params.wheel_options.turn_ang_threshold);
-    PRINT_INFO("UpdaterWheel initialized! noise_w=%.4f, noise_v=%.4f, p_OinI=[%.3f, %.3f, %.3f]\n",
-               params.wheel_options.noise_w, params.wheel_options.noise_v,
+    PRINT_INFO("UpdaterWheel initialized! p_OinI=[%.3f, %.3f, %.3f]\n",
                params.wheel_options.T_imu_wheel(0,3), params.wheel_options.T_imu_wheel(1,3), params.wheel_options.T_imu_wheel(2,3));
   }
 
-  // Platform motion model. Deliberately outside the wheel-odometry block: the
-  // kinematic knowledge holds on its own, so the constraint update must be
-  // available with or without an odometry stream. The per-axis noise shaping
-  // only has something to act on when a wheel measurement exists, so it is
-  // attached to the wheel updater only in that case.
+  // Platform kinematics. A sibling of the block above, not a modifier of it:
+  // the two integrate different information (an odometry stream, and what the
+  // vehicle can physically do), so either runs with or without the other and
+  // neither reaches into the other's noise model.
   if (params.state_options.do_platform_motion) {
-    platformModel = std::make_shared<PlatformMotionModel>(params.platform_options);
-    if (updaterWheel != nullptr) {
-      updaterWheel->set_platform(platformModel);
-      PRINT_INFO("PlatformMotionModel attached to UpdaterWheel! type=%d, do_wheel_adaptive=%d\n",
-                 (int)params.platform_options.type, (int)params.platform_options.do_wheel_adaptive);
-    }
-
-    if (params.platform_options.do_constraint_update) {
-      updaterPlatform = std::make_shared<UpdaterPlatform>(state, params.platform_options);
-      updaterPlatform->set_extrinsics(params.platform_options.T_imu_platform);
-      updaterPlatform->set_model(platformModel);
-      PRINT_INFO("UpdaterPlatform initialized! type=%d, wheel_odometry=%d\n",
-                 (int)params.platform_options.type, (int)params.state_options.do_wheel_odometry);
+    updaterPlatform = std::make_shared<UpdaterPlatform>(state, params.platform_options);
+    if (updaterPlatform->has_measurement()) {
+      PRINT_INFO("UpdaterPlatform initialized! type=%d, axes=%d, kernel_sigma=%.2f\n",
+                 (int)params.platform_options.type, (int)updaterPlatform->model()->axes().size(),
+                 params.platform_options.corr.kernel_sigma);
+    } else {
+      PRINT_WARNING(YELLOW "UpdaterPlatform: type=%d pins no axis, platform update will do nothing\n" RESET,
+                    (int)params.platform_options.type);
+      updaterPlatform = nullptr;
     }
   }
 
@@ -419,7 +414,7 @@ void VioManager::do_feature_propagate_update(const ov_core::CameraData &message)
 
   if (is_initialized_vio && updaterPlatform != nullptr && have_last_wm) {
       updaterPlatform->try_update(last_wm);
-      // constraint update modifies the state, invalidate propagator cache
+      // platform update modifies the state, invalidate propagator cache
       propagator->invalidate_cache();
   }
   // If we have not reached max clones, we should just return...

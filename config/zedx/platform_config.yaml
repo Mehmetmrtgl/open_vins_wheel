@@ -4,34 +4,61 @@ platform:
 
   # Morphology: "car" | "differential" | "legged" | "omni"
   # Selecting a type applies sensible defaults; any key below overrides them.
+  #
+  # This setup runs with wheel_odometry disabled, which is the point: the
+  # platform update needs no odometry stream. It describes the vehicle, and the
+  # correntropy-weighted Kalman step turns that into a correction on velocity,
+  # attitude and gyro bias from the IMU state alone.
   type: "car"
 
-  # ---- Nonholonomic constraint (car / differential) ----
-  do_constraint_update: true
-  # std-dev of the v=0 pseudo-measurement per body axis [x, y, z] (m/s).
-  # Small = hard constraint. x is free for a car so its value is ignored
-  # by the mask below.
-  constraint_sigma: [1.0e6, 0.05, 0.05]
-  constraint_mask: [0, 1, 1]
+  # ---- What the morphology asserts ----
+  # Lateral only, same reasoning as the kaist config: a car's v_z is nominally
+  # zero but violated continuously by suspension, pitch and grade.
+  meas_mask: [0, 1, 0]
+  meas_sigma: [1.0e6, 0.06, 1.0e6]
 
-  # ---- Per-axis odometry measurement noise (replaces scalar noise_v/noise_w) ----
-  # CAR: y/z linear channels are physically noise -> large sigma.
-  noise_v_axis: [0.10, 1.00, 1.00]
-  noise_w_axis: [0.05, 0.05, 0.05]
+  # ---- Slowly varying offset ----
+  # What the sensors report on a pinned axis is zero PLUS a drift the model does
+  # not resolve: mount calibration residue, road camber, suspension trim, a
+  # platform origin that is not quite the true zero-lateral-velocity point.
+  # Measured on urban39, 22.4% of 30 s windows of the lateral residual fall
+  # outside the white-noise band, so the structure is in the mean, not the
+  # scatter. Asserting a hard zero injects that drift a few thousand times per
+  # run; integrated, a persistent 0.01 m/s is ~19 m of cross-track. The offset is
+  # estimated and removed, so the assertion becomes "this axis does not depart
+  # from its own slow trend".
+  bias_tau: 15.0      # s; bracketed on urban39: 30s->10.298, 15s->8.854, 8s->9.414 m APE
+  bias_sigma: 0.02    # m/s; added in quadrature to meas_sigma
 
-  # ---- Gait model (legged) ----
-  # For type: "legged" set do_gait_model: true and leave noise_v_axis
-  # roughly isotropic; the oscillation is handled by periodicity detection,
-  # NOT by inflating noise.
-  do_gait_model: false
-  gait_freq_min: 0.5          # Hz, plausible gait band
-  gait_freq_max: 5.0
-  gait_periodicity_thresh: 0.55
-  gait_window: 128            # samples in the periodicity ring buffer
+  # The morphology is a standing fact, not a stream of independent samples.
+  update_min_dt: 0.2
+  chi2_mult: 1.0
 
-  # ---- Per-axis adaptive (correntropy) parameters, adaptive-branch style ----
-  corr_sigma: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]   # [rot xyz | pos xyz]
+  # ---- Correntropy weighting + innovation-based noise estimation ----
+  corr_kernel_sigma: 1.5
+  corr_gain_min: 1.0e-3
   corr_window: 75
   corr_recent: 5
-  r_scale_min: 0.5
+  r_scale_min: 1.0           # widening only; a floor below 1 lets the estimate tighten a self-satisfied assertion
   r_scale_max: 5.0
+
+  # ---- Gait / periodicity ----
+  # Never fires on a wheeled platform; kept so the band is explicit.
+  gait_freq_min: 0.5
+  gait_freq_max: 5.0
+  gait_periodicity_thresh: 0.55
+  gait_window: 128
+
+  # ---- Diagnostics ----
+  log_path: ""
+  do_jacobian_check: false
+
+  # Platform (body) frame. REQUIRED — not inherited from T_imu_wheel, which is
+  # what lets this config run with no wheel odometry at all.
+  # Convention T = [R_OtoI | p_OinI], the platform origin in the IMU frame.
+  # The rotation matches this rig's T_imu_wheel: platform x is IMU -y.
+  T_imu_platform:
+    - [0.0, 1.0, 0.0, 0.0]
+    - [-1.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 1.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]

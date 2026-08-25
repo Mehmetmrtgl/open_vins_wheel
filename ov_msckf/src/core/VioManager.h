@@ -34,7 +34,6 @@
 #include "VioManagerOptions.h"
 #include "update/UpdaterWheel.h"
 #include "update/UpdaterPlatform.h"
-#include "update/PlatformMotionModel.h"
 
 namespace ov_core {
 struct ImuData;
@@ -216,12 +215,11 @@ protected:
   /// Our zero velocity tracker
   std::shared_ptr<UpdaterZeroVelocity> updaterZUPT;
 
-  /// wheel updater
+  /// wheel odometry updater
   std::shared_ptr<UpdaterWheel> updaterWheel;
 
-  /// platform-aware nonholonomic constraint updater and motion model
+  /// platform kinematics updater (correntropy-weighted); independent of the above
   std::shared_ptr<UpdaterPlatform> updaterPlatform;
-  std::shared_ptr<PlatformMotionModel> platformModel;
 
   /// Most recent raw gyro sample, needed for UpdaterPlatform's lever-arm term
   Eigen::Vector3d last_wm = Eigen::Vector3d::Zero();

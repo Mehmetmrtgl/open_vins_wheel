@@ -140,80 +140,89 @@ struct VioManagerOptions {
           parser->parse_external("relative_config_wheel", "wheel", "turn_ang_threshold", wheel_options.turn_ang_threshold);
 
           parser->parse_external("relative_config_wheel", "wheel", "T_imu_wheel", wheel_options.T_imu_wheel);
+
+          // Lay the three ackermann sigmas over the six body axes, then let an
+          // explicit per-axis block override them. Vector-valued keys go through
+          // std::vector: FileStorage has no native Eigen::Vector reader.
+          wheel_options.apply_scalar_defaults();
+
+          std::vector<double> w_noise_w_axis = {wheel_options.noise_w_axis(0), wheel_options.noise_w_axis(1),
+                                                wheel_options.noise_w_axis(2)};
+          parser->parse_external("relative_config_wheel", "wheel", "noise_w_axis", w_noise_w_axis, false);
+          wheel_options.noise_w_axis = Eigen::Vector3d(w_noise_w_axis.at(0), w_noise_w_axis.at(1), w_noise_w_axis.at(2));
+
+          std::vector<double> w_noise_v_axis = {wheel_options.noise_v_axis(0), wheel_options.noise_v_axis(1),
+                                                wheel_options.noise_v_axis(2)};
+          parser->parse_external("relative_config_wheel", "wheel", "noise_v_axis", w_noise_v_axis, false);
+          wheel_options.noise_v_axis = Eigen::Vector3d(w_noise_v_axis.at(0), w_noise_v_axis.at(1), w_noise_v_axis.at(2));
       }
 
-      // Platform motion model. Parsed independently of wheel odometry on
-      // purpose: a car cannot move sideways and a legged robot oscillates in z
-      // whether or not an odometry message ever arrives.
+      // Platform kinematics. Parsed independently of wheel odometry on purpose:
+      // a car cannot move sideways and a legged robot oscillates in z whether or
+      // not an odometry message ever arrives, and T_imu_platform is required
+      // rather than inherited from the wheel block so it means the same thing in
+      // both cases.
       if(state_options.do_platform_motion) {
           PRINT_DEBUG("  - Loading platform motion options:\n");
 
-          // With no explicit platform frame, fall back to the wheel extrinsics
-          // so existing wheel-odometry setups behave exactly as before. Both
-          // are read as T = [R_OtoI | p_OinI], see UpdaterWheel/UpdaterPlatform.
-          if (state_options.do_wheel_odometry)
-              platform_options.T_imu_platform = wheel_options.T_imu_wheel;
           parser->parse_external("relative_config_platform", "platform", "T_imu_platform",
-                                 platform_options.T_imu_platform, false);
+                                 platform_options.T_imu_platform);
 
           std::string ptype = "omni";
           parser->parse_external("relative_config_platform", "platform", "type", ptype);
           platform_options.type = OptionsPlatform::type_from_string(ptype);
           platform_options.apply_type_defaults();
-          parser->parse_external("relative_config_platform", "platform", "do_constraint_update", platform_options.do_constraint_update);
-          parser->parse_external("relative_config_platform", "platform", "do_gait_model",         platform_options.do_gait_model);
-          parser->parse_external("relative_config_platform", "platform", "gait_freq_min",         platform_options.gait_freq_min);
-          parser->parse_external("relative_config_platform", "platform", "gait_freq_max",         platform_options.gait_freq_max);
-          parser->parse_external("relative_config_platform", "platform", "gait_periodicity_thresh", platform_options.gait_periodicity_thresh);
-          parser->parse_external("relative_config_platform", "platform", "gait_window",           platform_options.gait_window);
-          parser->parse_external("relative_config_platform", "platform", "corr_window",           platform_options.corr_window);
-          parser->parse_external("relative_config_platform", "platform", "corr_recent",           platform_options.corr_recent);
-          // Optional so platform configs written before adaptive weighting still load.
-          parser->parse_external("relative_config_platform", "platform", "do_constraint_adaptive",
-                                 platform_options.do_constraint_adaptive, false);
-          parser->parse_external("relative_config_platform", "platform", "constraint_corr_sigma",
-                                 platform_options.constraint_corr_sigma, false);
-          parser->parse_external("relative_config_platform", "platform", "constraint_corr_gain_min",
-                                 platform_options.constraint_corr_gain_min, false);
+
+          parser->parse_external("relative_config_platform", "platform", "update_min_dt",
+                                 platform_options.update_min_dt, false);
+          parser->parse_external("relative_config_platform", "platform", "bias_tau",
+                                 platform_options.bias_tau, false);
+          parser->parse_external("relative_config_platform", "platform", "bias_sigma",
+                                 platform_options.bias_sigma, false);
+          parser->parse_external("relative_config_platform", "platform", "chi2_mult",
+                                 platform_options.chi2_mult, false);
+
+          // Correntropy weighting + innovation-based noise estimation
+          parser->parse_external("relative_config_platform", "platform", "corr_kernel_sigma",
+                                 platform_options.corr.kernel_sigma, false);
+          parser->parse_external("relative_config_platform", "platform", "corr_gain_min",
+                                 platform_options.corr.gain_min, false);
+          parser->parse_external("relative_config_platform", "platform", "corr_window",
+                                 platform_options.corr.window, false);
+          parser->parse_external("relative_config_platform", "platform", "corr_recent",
+                                 platform_options.corr.recent, false);
+          parser->parse_external("relative_config_platform", "platform", "r_scale_min",
+                                 platform_options.corr.r_scale_min, false);
+          parser->parse_external("relative_config_platform", "platform", "r_scale_max",
+                                 platform_options.corr.r_scale_max, false);
+
+          // Gait / periodicity
+          parser->parse_external("relative_config_platform", "platform", "gait_freq_min",
+                                 platform_options.gait_freq_min, false);
+          parser->parse_external("relative_config_platform", "platform", "gait_freq_max",
+                                 platform_options.gait_freq_max, false);
+          parser->parse_external("relative_config_platform", "platform", "gait_periodicity_thresh",
+                                 platform_options.gait_periodicity_thresh, false);
+          parser->parse_external("relative_config_platform", "platform", "gait_window",
+                                 platform_options.gait_window, false);
+
+          // Diagnostics
           parser->parse_external("relative_config_platform", "platform", "do_jacobian_check",
                                  platform_options.do_jacobian_check, false);
-          parser->parse_external("relative_config_platform", "platform", "constraint_min_dt",
-                                 platform_options.constraint_min_dt, false);
-          parser->parse_external("relative_config_platform", "platform", "constraint_log_path",
-                                 platform_options.constraint_log_path, false);
-          parser->parse_external("relative_config_platform", "platform", "do_wheel_adaptive",
-                                 platform_options.do_wheel_adaptive, false);
-          parser->parse_external("relative_config_platform", "platform", "r_scale_min",
-                                 platform_options.r_scale_min, false);
-          parser->parse_external("relative_config_platform", "platform", "r_scale_max",
-                                 platform_options.r_scale_max, false);
+          parser->parse_external("relative_config_platform", "platform", "log_path",
+                                 platform_options.log_path, false);
 
           // Vector-valued keys: FileStorage has no native Eigen::Vector reader, so
           // round-trip through std::vector like the cam intrinsics/extrinsics above.
-          std::vector<double> constraint_sigma_v = {platform_options.constraint_sigma(0), platform_options.constraint_sigma(1),
-                                                     platform_options.constraint_sigma(2)};
-          parser->parse_external("relative_config_platform", "platform", "constraint_sigma", constraint_sigma_v);
-          platform_options.constraint_sigma = Eigen::Vector3d(constraint_sigma_v.at(0), constraint_sigma_v.at(1), constraint_sigma_v.at(2));
+          std::vector<double> meas_sigma_v = {platform_options.meas_sigma(0), platform_options.meas_sigma(1),
+                                              platform_options.meas_sigma(2)};
+          parser->parse_external("relative_config_platform", "platform", "meas_sigma", meas_sigma_v, false);
+          platform_options.meas_sigma = Eigen::Vector3d(meas_sigma_v.at(0), meas_sigma_v.at(1), meas_sigma_v.at(2));
 
-          std::vector<int> constraint_mask_v = {platform_options.constraint_mask(0), platform_options.constraint_mask(1),
-                                                platform_options.constraint_mask(2)};
-          parser->parse_external("relative_config_platform", "platform", "constraint_mask", constraint_mask_v);
-          platform_options.constraint_mask = Eigen::Vector3i(constraint_mask_v.at(0), constraint_mask_v.at(1), constraint_mask_v.at(2));
-
-          std::vector<double> noise_v_axis_v = {platform_options.noise_v_axis(0), platform_options.noise_v_axis(1),
-                                                platform_options.noise_v_axis(2)};
-          parser->parse_external("relative_config_platform", "platform", "noise_v_axis", noise_v_axis_v);
-          platform_options.noise_v_axis = Eigen::Vector3d(noise_v_axis_v.at(0), noise_v_axis_v.at(1), noise_v_axis_v.at(2));
-
-          std::vector<double> noise_w_axis_v = {platform_options.noise_w_axis(0), platform_options.noise_w_axis(1),
-                                                platform_options.noise_w_axis(2)};
-          parser->parse_external("relative_config_platform", "platform", "noise_w_axis", noise_w_axis_v);
-          platform_options.noise_w_axis = Eigen::Vector3d(noise_w_axis_v.at(0), noise_w_axis_v.at(1), noise_w_axis_v.at(2));
-
-          std::vector<double> corr_sigma_v(platform_options.corr_sigma.data(), platform_options.corr_sigma.data() + 6);
-          parser->parse_external("relative_config_platform", "platform", "corr_sigma", corr_sigma_v);
-          for (int i = 0; i < 6; i++)
-            platform_options.corr_sigma(i) = corr_sigma_v.at(i);
+          std::vector<int> meas_mask_v = {platform_options.meas_mask(0), platform_options.meas_mask(1),
+                                          platform_options.meas_mask(2)};
+          parser->parse_external("relative_config_platform", "platform", "meas_mask", meas_mask_v, false);
+          platform_options.meas_mask = Eigen::Vector3i(meas_mask_v.at(0), meas_mask_v.at(1), meas_mask_v.at(2));
       }
 
     }
@@ -228,8 +237,10 @@ struct VioManagerOptions {
 
     PRINT_DEBUG("  - wheel_options:\n");
     PRINT_DEBUG("    - topic: %s\n", wheel_options.topic.c_str());
-    PRINT_DEBUG("    - noise_v: %.5f\n", wheel_options.noise_v);
-    PRINT_DEBUG("    - noise_w: %.5f\n", wheel_options.noise_w);
+    PRINT_DEBUG("    - noise_w_axis: [%.5f %.5f %.5f]\n",
+                wheel_options.noise_w_axis(0), wheel_options.noise_w_axis(1), wheel_options.noise_w_axis(2));
+    PRINT_DEBUG("    - noise_v_axis: [%.5f %.5f %.5f]\n",
+                wheel_options.noise_v_axis(0), wheel_options.noise_v_axis(1), wheel_options.noise_v_axis(2));
     PRINT_DEBUG("    - chi2_mult: %.2f\n", wheel_options.chi2_mult);
 
 
@@ -244,13 +255,28 @@ struct VioManagerOptions {
 
     PRINT_DEBUG("  - platform_options:\n");
     PRINT_DEBUG("    - type: %d\n", (int)platform_options.type);
-    PRINT_DEBUG("    - do_constraint_update: %d\n", platform_options.do_constraint_update);
-    PRINT_DEBUG("    - do_wheel_adaptive: %d\n", platform_options.do_wheel_adaptive);
-    PRINT_DEBUG("    - do_gait_model: %d\n", platform_options.do_gait_model);
-    PRINT_DEBUG("    - noise_v_axis: [%.4f %.4f %.4f]\n",
-                platform_options.noise_v_axis(0), platform_options.noise_v_axis(1), platform_options.noise_v_axis(2));
-    PRINT_DEBUG("    - noise_w_axis: [%.4f %.4f %.4f]\n",
-                platform_options.noise_w_axis(0), platform_options.noise_w_axis(1), platform_options.noise_w_axis(2));
+    PRINT_DEBUG("    - meas_mask: [%d %d %d]\n",
+                platform_options.meas_mask(0), platform_options.meas_mask(1), platform_options.meas_mask(2));
+    PRINT_DEBUG("    - meas_sigma: [%.4f %.4f %.4f]\n",
+                platform_options.meas_sigma(0), platform_options.meas_sigma(1), platform_options.meas_sigma(2));
+    PRINT_DEBUG("    - update_min_dt: %.3f\n", platform_options.update_min_dt);
+    PRINT_DEBUG("    - bias: tau=%.1fs sigma=%.4f\n", platform_options.bias_tau, platform_options.bias_sigma);
+    PRINT_DEBUG("    - chi2_mult: %.2f\n", platform_options.chi2_mult);
+    PRINT_DEBUG("    - corr: kernel_sigma=%.3f gain_min=%.1e window=%d recent=%d scale=[%.2f %.2f]\n",
+                platform_options.corr.kernel_sigma, platform_options.corr.gain_min,
+                platform_options.corr.window, platform_options.corr.recent,
+                platform_options.corr.r_scale_min, platform_options.corr.r_scale_max);
+    PRINT_DEBUG("    - gait: band=[%.2f %.2f]Hz thresh=%.2f window=%d\n",
+                platform_options.gait_freq_min, platform_options.gait_freq_max,
+                platform_options.gait_periodicity_thresh, platform_options.gait_window);
+    PRINT_DEBUG("    - T_imu_platform:\n");
+    for (int i = 0; i < 4; i++) {
+        PRINT_DEBUG("      % .5f % .5f % .5f % .5f\n",
+            platform_options.T_imu_platform(i, 0),
+            platform_options.T_imu_platform(i, 1),
+            platform_options.T_imu_platform(i, 2),
+            platform_options.T_imu_platform(i, 3));
+    }
   }
 
   // NOISE / CHI2 ============================

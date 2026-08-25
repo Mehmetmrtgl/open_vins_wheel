@@ -4,24 +4,29 @@
 #include <Eigen/Eigen>
 #include <string>
 
+#include "CorrentropyFilter.h"
+
 namespace ov_msckf {
 
 /**
  * @brief Platform (robot morphology) motion-model options.
  *
- * This describes what the robot CAN physically do, expressed in the
- * odometry/body frame (x forward, y left, z up):
+ * This describes what the robot CAN physically do, expressed in the platform
+ * body frame (x forward, y left, z up), and nothing else. It carries no wheel
+ * odometry parameters: the platform model is a self-contained estimator that
+ * runs with or without an odometry stream, and the wheel updater owns its own
+ * noise model (see OptionsWheel).
  *
- *  - CAR (Ackermann):      cannot move along y or z. Any measured v_y / v_z
- *                          is sensor noise, and additionally v_y=0, v_z=0
- *                          can be exploited as pseudo-measurements
- *                          (nonholonomic constraint update).
- *  - DIFFERENTIAL:         same lateral constraint as car (no v_y), z depends
- *                          on terrain so it is only softly constrained.
- *  - LEGGED:               CAN move laterally, and exhibits a periodic
- *                          gait oscillation on z (and pitch) that is REAL
- *                          motion, not noise. Constraints must not suppress it.
- *  - OMNIDIRECTIONAL:      no kinematic constraint (mecanum, drone-like base).
+ *  - CAR (Ackermann):      cannot slide sideways. v_y = 0 is a measurement the
+ *                          morphology supplies at every instant. v_z is NOT
+ *                          asserted: suspension travel, pitch under braking
+ *                          and road grade violate it continuously.
+ *  - DIFFERENTIAL:         same lateral fact, z likewise free over terrain.
+ *  - LEGGED:               y and z are real DOFs, but their gait-cycle MEAN is
+ *                          zero. Asserted loosely, with the periodic component
+ *                          absorbed into the covariance rather than fought.
+ *  - OMNIDIRECTIONAL:      no kinematic knowledge (mecanum, drone-like base);
+ *                          the platform updater has nothing to contribute.
  */
 struct OptionsPlatform {
 
@@ -30,71 +35,73 @@ struct OptionsPlatform {
     /// Platform morphology
     PlatformType type = OMNIDIRECTIONAL;
 
-    /// Enable the nonholonomic pseudo-measurement update (v_y=0 / v_z=0)
-    bool do_constraint_update = false;
-
-    /// How strongly each body axis is constrained (std-dev of the
-    /// pseudo-measurement "velocity = 0", in m/s). Small sigma = hard
-    /// constraint. Use a large value (or disable via mask) for free axes.
+    /// Which body axes the morphology pins (1 = the model asserts v_axis = 0).
     /// Order: [x, y, z]
-    Eigen::Vector3d constraint_sigma = Eigen::Vector3d(1e6, 0.05, 0.05);
+    Eigen::Vector3i meas_mask = Eigen::Vector3i(0, 0, 0);
 
-    /// Which axes the constraint applies to (1 = constrained, 0 = free)
-    /// CAR default: x free, y and z constrained.
-    Eigen::Vector3i constraint_mask = Eigen::Vector3i(0, 1, 1);
+    /// Std-dev of the "body velocity on this axis is zero" measurement, in m/s.
+    /// This is how far the true velocity may depart from zero for reasons the
+    /// model does not resolve: tyre slip on y, suspension motion on z, gait
+    /// excursion on a legged base. Order: [x, y, z]; entries of unmasked axes
+    /// are unused.
+    Eigen::Vector3d meas_sigma = Eigen::Vector3d(1e6, 0.05, 0.05);
 
-    /// Down-weight the constraint per sample instead of trusting a fixed sigma.
-    /// The residual is not Gaussian: on smooth straight driving it is
-    /// essentially exactly zero, and it is violated in bursts (turns, bumps,
-    /// road camber). One sigma cannot fit both — tight enough for the bulk
-    /// makes the bursts blow past the chi2 gate, loose enough for the bursts
-    /// makes the bulk contribute nothing. With this on, constraint_sigma is
-    /// chosen for the bulk and a violation softens its own weight.
-    bool do_constraint_adaptive = true;
-
-    /// Correntropy kernel bandwidth for the constraint, in units of normalized
-    /// innovation. Residuals within ~this many sigma keep (almost) full weight.
-    double constraint_corr_sigma = 1.5;
-
-    /// Floor on the correntropy weight, i.e. cap on how far R may be inflated
-    /// (R scales by 1/g^2, so 1e-3 caps the inflation at 1e6).
-    double constraint_corr_gain_min = 1e-3;
-
-    /// Minimum spacing between constraint updates, in seconds (0 = every frame).
+    /// -------- Slowly varying offset --------
     ///
-    /// The nonholonomic constraint is a standing kinematic fact, not a stream of
-    /// independent observations. Its residual error is dominated by slowly
-    /// varying sources (calibration residue, road camber, suspension, tyre
-    /// slip), so consecutive samples are strongly correlated. Applying it at
+    /// The morphology says the body velocity on a pinned axis is zero. What the
+    /// sensors report on that axis is zero PLUS a slowly varying offset: mount
+    /// calibration residue, road camber, suspension trim, a platform frame whose
+    /// origin is not quite the true zero-lateral-velocity point. Measured on
+    /// urban39 that offset is real — 22.4% of 30 s windows of the lateral
+    /// residual fall outside the +/-3 sigma/sqrt(N) band a white residual would
+    /// stay inside, and the residual's decorrelation time is far shorter than
+    /// the drift, so the structure is in the mean, not the scatter.
+    ///
+    /// Asserting a hard zero therefore injects that offset into the state a few
+    /// thousand times per run. Integrated over urban39 a persistent 0.01 m/s of
+    /// lateral error is ~19 m of cross-track, the same order as the whole APE.
+    /// So the offset is estimated here and removed before the update, turning
+    /// the assertion from "lateral velocity is zero" into "lateral velocity does
+    /// not depart from its own slow trend" — which is the part of the kinematic
+    /// fact the sensors actually support.
+
+    /// Time constant of the offset estimate, in seconds (0 disables it and
+    /// restores the hard-zero assertion). Must be long compared with a turn, so
+    /// genuine lateral motion is not absorbed into the offset.
+    double bias_tau = 15.0;
+
+    /// How well the offset is believed to be known, in m/s. Added in quadrature
+    /// to meas_sigma, because a measurement corrected by an estimate is no more
+    /// certain than the estimate.
+    double bias_sigma = 0.02;
+
+    /// Minimum spacing between platform updates, in seconds (0 = every frame).
+    ///
+    /// The morphology is a standing fact, not a stream of independent
+    /// observations. Its residual error is dominated by slowly varying sources
+    /// (calibration residue, road camber, suspension, tyre slip), so
+    /// consecutive samples are strongly correlated. Applying the measurement at
     /// full frame rate treats that correlated error as white and accumulates
     /// N/sigma^2 worth of information instead of 1/sigma^2, which drives the
-    /// covariance below the truth. Spacing the updates out is the crude but
-    /// direct way to bound that over-counting.
-    double constraint_min_dt = 0.0;
+    /// covariance below the truth. Spacing the updates out bounds that.
+    double update_min_dt = 0.2;
 
-    /// If non-empty, append one CSV row per constraint evaluation (state time,
-    /// per-axis residual, predicted forward speed, bias-corrected gyro, chi2,
-    /// accepted flag) to this file. Rejected evaluations are logged too.
-    /// Consumed offline by ov_msckf/scripts/residual_diagnostics.py.
-    std::string constraint_log_path = "";
+    /// Multiplier on the 95% chi2 gate that backstops the correntropy weighting
+    /// for violations it cannot absorb (hard skid, sensor fault).
+    double chi2_mult = 1.0;
 
-    /// Debug aid: compare the constraint's analytic Jacobian against finite
-    /// differences taken through the IMU type's own update(), so the check
-    /// validates it against OpenVINS' error convention rather than against our
-    /// reading of that convention. Prints for the first few updates only.
-    bool do_jacobian_check = false;
+    /// Correntropy weighting + innovation-based noise estimation. This is the
+    /// estimator itself, not an option on top of it, so it has no on/off flag:
+    /// the parameters below say how sharp the kernel is and how far the noise
+    /// estimate may move, and a large kernel_sigma is what "plain Kalman" means
+    /// here.
+    OptionsCorrentropy corr;
 
-    /// Per-axis wheel/leg odometry measurement noise std-devs.
-    /// Replaces the single scalar noise_v / noise_w of OptionsWheel.
-    /// For a car, noise_v_axis y/z should be LARGE (that channel is
-    /// pure noise); for a legged robot they stay comparable to x.
-    Eigen::Vector3d noise_v_axis = Eigen::Vector3d(0.1, 0.1, 0.1);
-    Eigen::Vector3d noise_w_axis = Eigen::Vector3d(0.1, 0.1, 0.1);
-
-    /// -------- Gait / oscillation modelling (LEGGED) --------
-
-    /// Enable gait-aware adaptive noise (periodicity detection)
-    bool do_gait_model = false;
+    /// -------- Gait / oscillation modelling --------
+    /// Always evaluated. On a wheeled platform no periodicity exists in the
+    /// band below and the test simply never fires, so this needs no flag
+    /// either; on a legged one it is what keeps the gait from being mistaken
+    /// for noise.
 
     /// Plausible gait frequency band [Hz] used to validate detected periodicity
     double gait_freq_min = 0.5;
@@ -106,37 +113,29 @@ struct OptionsPlatform {
     /// Ring-buffer length (samples) for periodicity analysis
     int gait_window = 128;
 
-    /// Apply the adaptive machinery (per-axis correntropy, sliding-window R
-    /// scale, gait handling) to the 6-dof wheel residual in adapt_R. With this
-    /// off, the wheel update behaves exactly like the legacy path except for
-    /// the per-axis Q from base_noise, which is what the noise-shaping
-    /// experiments must isolate.
-    bool do_wheel_adaptive = true;
-
-    /// -------- Per-axis adaptive (correntropy) parameters --------
-    /// Same roles as in the adaptive branch's correntropy filter, but resolved per axis of the
-    /// 6-dof wheel residual [rot(3), pos(3)].
-
-    /// Kernel bandwidth sigma per residual axis
-    Eigen::Matrix<double, 6, 1> corr_sigma =
-        (Eigen::Matrix<double, 6, 1>() << 1.5, 1.5, 1.5, 1.5, 1.5, 1.5).finished();
-
-    /// Sliding window length before the adaptive machinery activates
-    int corr_window = 75;
-
-    /// Number of most recent steps used for the per-axis R scale
-    int corr_recent = 5;
-
-    /// Clamp range for the adaptive R scale (mirrors adaptive branch [0.5, 5.0])
-    double r_scale_min = 0.5;
-    double r_scale_max = 5.0;
-
     /// -------- Platform frame --------
-    /// Transform from the IMU frame to the platform (body) frame the kinematic
-    /// constraints are expressed in. Separate from T_imu_wheel so the platform
-    /// model works with no wheel odometry configured at all; when wheel odometry
-    /// IS configured and this is left unset, it defaults to T_imu_wheel.
+    /// Transform from the platform (body) frame the kinematics are expressed in
+    /// to the IMU frame. Same convention as T_imu_wheel:
+    ///   T = [R_OtoI | p_OinI ; 0 0 0 1]
+    /// Required: the platform model does not fall back to the wheel extrinsics,
+    /// because it must mean the same thing whether or not wheel odometry is
+    /// configured at all.
     Eigen::Matrix4d T_imu_platform = Eigen::Matrix4d::Identity();
+
+    /// -------- Diagnostics --------
+
+    /// If non-empty, append one CSV row per platform update evaluation (state
+    /// time, per-axis residual, predicted forward speed, bias-corrected gyro,
+    /// chi2, correntropy weights, accepted flag) to this file. Rejected
+    /// evaluations are logged too. Consumed offline by
+    /// ov_msckf/scripts/residual_diagnostics.py.
+    std::string log_path = "";
+
+    /// Debug aid: compare the analytic Jacobian against finite differences taken
+    /// through the IMU type's own update(), so the check validates it against
+    /// OpenVINS' error convention rather than against our reading of that
+    /// convention. Prints for the first few updates only.
+    bool do_jacobian_check = false;
 
     static PlatformType type_from_string(const std::string &s) {
         if (s == "car" || s == "ackermann") return CAR;
@@ -150,35 +149,44 @@ struct OptionsPlatform {
     void apply_type_defaults() {
         switch (type) {
         case CAR:
-            // The nonholonomic fact flows through the wheel preintegration:
-            // the measured zeros on v_y / v_z are the constraint, and a small
-            // sigma on those axes is how morphology knowledge is expressed.
-            // The explicit pseudo-measurement stays available as a flag for
-            // control experiments and for the no-wheel case, default off.
-            do_constraint_update = false;
-            constraint_mask = Eigen::Vector3i(0, 1, 1);
-            constraint_sigma = Eigen::Vector3d(1e6, 0.05, 0.05);
-            noise_v_axis = Eigen::Vector3d(0.5, 0.15, 0.25); // y/z tightened, not inflated
-            do_gait_model = false;
+            // Lateral only. Asserting v_z at the same tightness moved urban39
+            // APE from 10.94 m to 37.30 m with nothing else changed: a car's
+            // vertical velocity is nominally zero but violated continuously by
+            // suspension travel, pitch and grade transitions.
+            meas_mask = Eigen::Vector3i(0, 1, 0);
+            // 0.06, close to the 0.040 m/s the lateral residual scatters at on
+            // urban39. Loosening it to 0.15 was tried on the theory that the
+            // residual's low-frequency bias needed covering, and it made things
+            // worse (12.742 m -> 13.024 m APE), because the correntropy kernel
+            // works on NORMALIZED innovation: a loose meas_sigma makes every
+            // residual look consistent and silently disables the down-weighting
+            // (max R inflation collapsed from 526x to 2.8x, chi2 never reached
+            // its gate). meas_sigma and corr.kernel_sigma are one setting in two
+            // parts — moving either alone changes how robust the update is.
+            meas_sigma = Eigen::Vector3d(1e6, 0.06, 1e6);
+            update_min_dt = 0.2;
             break;
         case DIFFERENTIAL:
-            do_constraint_update = true;
-            constraint_mask = Eigen::Vector3i(0, 1, 0);   // only lateral hard
-            constraint_sigma = Eigen::Vector3d(1e6, 0.05, 1e6);
-            noise_v_axis = Eigen::Vector3d(0.1, 1.0, 0.5);
-            do_gait_model = false;
+            meas_mask = Eigen::Vector3i(0, 1, 0);
+            meas_sigma = Eigen::Vector3d(1e6, 0.05, 1e6);
+            update_min_dt = 0.2;
             break;
         case LEGGED:
-            do_constraint_update = false;                  // y and z are real DOFs
-            constraint_mask = Eigen::Vector3i(0, 0, 0);
-            noise_v_axis = Eigen::Vector3d(0.15, 0.15, 0.15);
-            do_gait_model = true;                          // model, don't reject
+            // y and z are real DOFs, so the assertion is loose and its job is
+            // to anchor the gait-cycle mean. The oscillation itself is detected
+            // and absorbed into R rather than treated as an outlier.
+            meas_mask = Eigen::Vector3i(0, 1, 1);
+            meas_sigma = Eigen::Vector3d(1e6, 0.30, 0.30);
+            // Every frame: the periodicity buffers only see rate-limited
+            // samples, so throttling to 5 Hz would put the top of the gait band
+            // above Nyquist and the oscillation would alias instead of being
+            // detected. The gait absorption is what keeps this from
+            // over-counting, in place of the spacing a wheeled base needs.
+            update_min_dt = 0.0;
             break;
         case OMNIDIRECTIONAL:
         default:
-            do_constraint_update = false;
-            constraint_mask = Eigen::Vector3i(0, 0, 0);
-            do_gait_model = false;
+            meas_mask = Eigen::Vector3i(0, 0, 0);
             break;
         }
     }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Offline diagnostics for the platform-constraint residual log.
+"""Offline diagnostics for the platform update residual log.
 
-Consumes the CSV written by UpdaterPlatform when platform.constraint_log_path
+Consumes the CSV written by UpdaterPlatform when platform.log_path
 is set. Produces, for the lateral (y) residual:
 
   1. Lag-k autocorrelation of the residual sequence, plus the decorrelation
@@ -83,7 +83,7 @@ def main(path):
         if k <= max_lag:
             print(f"    lag {k:4d} ({k * dt:6.2f} s): r = {r[k]:+.3f}")
     print(f"    decorrelation time (r < 1/e): {tau:.2f} s"
-          f"   -> principled constraint_min_dt >= {tau:.1f}")
+          f"   -> principled update_min_dt >= {tau:.1f}")
     print("    verdict: " + ("RESIDUAL IS TIME-CORRELATED, per-sample white-noise "
                              "updates over-count it"
                              if r[1] >= 0.2 else

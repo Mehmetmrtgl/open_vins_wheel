@@ -1,69 +1,103 @@
 #include "PlatformMotionModel.h"
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 #include "utils/print.h"
 
 using namespace ov_msckf;
 
 // ============================================================================
-// base_noise
-//
-// Continuous-time noise covariance, per axis, from the platform profile.
-// Same discretization convention as the original UpdaterWheel
-// (sigma^2 / dt on the diagonal, consumed by the G*Q*G^T dt^2 propagation).
+// Construction
 // ============================================================================
-Eigen::Matrix<double, 6, 6> PlatformMotionModel::base_noise(double dt) const {
+PlatformMotionModel::PlatformMotionModel(const OptionsPlatform &opts)
+    : _opts(opts), _corr(opts.corr) {
 
-    Eigen::Matrix<double, 6, 6> Q = Eigen::Matrix<double, 6, 6>::Zero();
-
-    // Platform knowledge enters here as per-axis TIGHTENING of the constrained
-    // axes, not as inflation. The odometry stream reports v = [v_x, 0, 0]; the
-    // zeros on y and z are not dead channels, they are the nonholonomic
-    // constraint itself, asserted at every sample and converted by the wheel
-    // preintegration into a relative displacement between clones, which is the
-    // correct temporal model for a standing kinematic fact (counted once per
-    // clone interval, noise integrated over the interval, FEJ-consistent
-    // Jacobians in compute_linear_system). A small sigma on y/z states how far
-    // the true body velocity may depart from zero (tyre slip, suspension
-    // motion), so morphology is expressed entirely through noise_v_axis.
-    // The previous version inflated constrained axes to 10x the quietest axis
-    // on the premise that those channels are noise; that removed exactly the
-    // constraint information the wheel channel was carrying, measured on
-    // urban39 as 8.915 m -> 12.951 m APE with the explicit constraint off.
     for (int i = 0; i < 3; i++) {
-        const double sw = _opts.noise_w_axis(i);
-        const double sv = _opts.noise_v_axis(i);
-        Q(i, i)         = (sw * sw) / dt;   // rotation block
-        Q(3 + i, 3 + i) = (sv * sv) / dt;   // position block
+        if (_opts.meas_mask(i) == 1)
+            _axes_idx.push_back(i);
     }
-    return Q;
 }
 
 // ============================================================================
-// push_innovation
+// base_R
 // ============================================================================
-void PlatformMotionModel::push_innovation(double timestamp,
-                                          const Eigen::Matrix<double, 6, 1> &innov) {
+Eigen::MatrixXd PlatformMotionModel::base_R() const {
+
+    const int m = (int)_axes_idx.size();
+    const double sb = (_opts.bias_tau > 0.0) ? std::max(_opts.bias_sigma, 0.0) : 0.0;
+
+    Eigen::MatrixXd R = Eigen::MatrixXd::Zero(m, m);
+    for (int k = 0; k < m; k++) {
+        const double s = std::max(_opts.meas_sigma(_axes_idx[k]), 1e-4);
+        // In quadrature: the residual has been corrected by an estimate, so it
+        // cannot be trusted more tightly than that estimate is known.
+        R(k, k) = s * s + sb * sb;
+    }
+    return R;
+}
+
+// ============================================================================
+// debias
+// ============================================================================
+Eigen::VectorXd PlatformMotionModel::debias(const Eigen::VectorXd &res_raw) const {
+
+    const int m = (int)_axes_idx.size();
+    if (_opts.bias_tau <= 0.0 || (int)res_raw.size() != m)
+        return res_raw;
+
+    Eigen::VectorXd res(m);
+    for (int k = 0; k < m; k++) {
+        res(k) = res_raw(k) - _bias[_axes_idx[k]];
+    }
+    return res;
+}
+
+// ============================================================================
+// push_residual
+// ============================================================================
+void PlatformMotionModel::push_residual(double timestamp,
+                                        const Eigen::VectorXd &res) {
+
+    if ((int)res.size() != (int)_axes_idx.size())
+        return;
+
+    // ---- slowly varying offset ----
+    // First-order low pass on the RAW residual. tau must be long compared with
+    // a turn so that genuine lateral motion is not absorbed; at 30 s and the
+    // ~3 Hz evaluation rate this averages ~100 samples.
+    if (_opts.bias_tau > 0.0) {
+        if (_bias_time >= 0.0) {
+            const double dt = timestamp - _bias_time;
+            if (dt > 0.0) {
+                const double alpha = std::min(1.0, dt / _opts.bias_tau);
+                for (int k = 0; k < (int)_axes_idx.size(); k++) {
+                    double &b = _bias[_axes_idx[k]];
+                    b += alpha * (res(k) - b);
+                }
+            }
+        }
+        _bias_time = timestamp;
+    }
 
     _time_buf.push_back(timestamp);
-    for (int i = 0; i < 6; i++) {
-        _raw_buf[i].push_back(innov(i));
+    for (int k = 0; k < (int)_axes_idx.size(); k++) {
+        _raw_buf[_axes_idx[k]].push_back(res(k));
     }
     while ((int)_time_buf.size() > _opts.gait_window) {
         _time_buf.pop_front();
-        for (int i = 0; i < 6; i++) _raw_buf[i].pop_front();
+        for (int a : _axes_idx)
+            _raw_buf[a].pop_front();
     }
 }
 
 // ============================================================================
 // detect_periodicity
 //
-// Normalized autocorrelation. A noise sequence decorrelates immediately;
-// a gait oscillation produces a strong peak at lag = 1/f_gait. We accept the
-// peak only if the implied frequency lies inside the configured gait band,
-// which prevents slow drifts or aliasing from being classified as gait.
+// Normalized autocorrelation. A noise sequence decorrelates immediately; a gait
+// oscillation produces a strong peak at lag = 1/f_gait. The peak is accepted
+// only if the implied frequency lies inside the configured gait band, which
+// keeps slow drifts and aliasing from being classified as gait.
 // ============================================================================
 bool PlatformMotionModel::detect_periodicity(const std::deque<double> &buf,
                                              double mean_dt,
@@ -104,9 +138,9 @@ bool PlatformMotionModel::detect_periodicity(const std::deque<double> &buf,
     if (best_lag < 0 || best_r < _opts.gait_periodicity_thresh) return false;
 
     // Oscillation signature check: a genuine gait oscillation (sinusoid-like)
-    // is strongly ANTI-correlated at half its period, while a periodic
-    // impulse train (repeating glitches, encoder faults) is not. This keeps
-    // impulsive artifacts on the correntropy down-weighting path.
+    // is strongly ANTI-correlated at half its period, while a periodic impulse
+    // train (repeating glitches, encoder faults) is not. This keeps impulsive
+    // artifacts on the correntropy down-weighting path, where they belong.
     const int half_lag = best_lag / 2;
     if (half_lag >= 2) {
         double acc_h = 0.0;
@@ -115,158 +149,64 @@ bool PlatformMotionModel::detect_periodicity(const std::deque<double> &buf,
         if (r_half > -0.25 * best_r) return false;
     }
 
-    freq_out  = 1.0 / (best_lag * mean_dt);
+    freq_out = 1.0 / (best_lag * mean_dt);
     power_out = best_r * var;   // variance share of the periodic component
     return true;
 }
 
 // ============================================================================
-// adapt_constraint_R
-// ============================================================================
-void PlatformMotionModel::adapt_constraint_R(Eigen::MatrixXd &R,
-                                             const Eigen::VectorXd &res,
-                                             const std::vector<int> &axes) {
-
-    if (!_opts.do_constraint_adaptive)
-        return;
-
-    const double s = std::max(_opts.constraint_corr_sigma, 1e-6);
-
-    for (int k = 0; k < (int)axes.size(); k++) {
-        const double r_kk = std::max(R(k, k), 1e-12);
-        const double n = std::fabs(res(k)) / std::sqrt(r_kk);   // normalized innovation
-
-        double g = std::exp(-(n * n) / (2.0 * s * s));
-        g = std::max(g, _opts.constraint_corr_gain_min);
-
-        R(k, k) *= 1.0 / (g * g);
-        _constraint_gain[axes[k]] = g;
-    }
-}
-
-// ============================================================================
 // adapt_R
 // ============================================================================
-void PlatformMotionModel::adapt_R(Eigen::Matrix<double, 6, 6> &R,
-                                  const Eigen::Matrix<double, 6, 1> &res) {
+void PlatformMotionModel::adapt_R(Eigen::MatrixXd &R, const Eigen::VectorXd &res,
+                                  const Eigen::MatrixXd &HPHt) {
 
-    // Off = the wheel update is exactly the legacy path except for the
-    // per-axis Q from base_noise. The urban39 ablations need this isolation:
-    // adapt_R alone moved the wheel result 8.915 m -> 10.786 m, so leaving it
-    // active would mix that penalty into the noise-shaping measurement.
-    if (!_opts.do_wheel_adaptive)
+    const int m = (int)_axes_idx.size();
+    if (m == 0 || (int)res.size() != m || R.rows() != m || R.cols() != m)
         return;
 
-    // ---- 1) normalized innovation per axis (adaptive-branch formula) ----
-    Eigen::Matrix<double, 6, 1> n_innov;
-    for (int i = 0; i < 6; i++) {
-        double r_ii = std::max(R(i, i), 1e-12);
-        n_innov(i) = std::fabs(res(i)) / std::sqrt(r_ii);
-    }
-
-    // ---- 2) refresh periodicity classification ----
+    // ---- 1) refresh the periodicity classification ----
     double mean_dt = 0.0;
     if (_time_buf.size() >= 2) {
         mean_dt = (_time_buf.back() - _time_buf.front()) / (double)(_time_buf.size() - 1);
     }
-    if (_opts.do_gait_model && mean_dt > 0.0) {
-        for (int i = 0; i < 6; i++) {
+    if (mean_dt > 0.0) {
+        for (int a : _axes_idx) {
             double f = 0.0, p = 0.0;
-            _axes[i].periodic = detect_periodicity(_raw_buf[i], mean_dt, f, p);
-            _axes[i].freq_hz  = _axes[i].periodic ? f : 0.0;
-            _axes[i].osc_var  = _axes[i].periodic ? p : 0.0;
+            _axis[a].periodic = detect_periodicity(_raw_buf[a], mean_dt, f, p);
+            _axis[a].freq_hz = _axis[a].periodic ? f : 0.0;
+            _axis[a].osc_var = _axis[a].periodic ? p : 0.0;
         }
     }
 
-    // Window not full yet: identity behaviour, exactly like the adaptive branch
-    const bool window_full = active();
-
-    // Per-axis multiplicative factors. They are collected here and applied once
-    // at the end as a congruence transform: R is not diagonal (the -skew(dp)
-    // block of the preintegration Jacobian couples rotation into position), so
-    // touching only R(i,i) would leave the cross-terms behind and any factor
-    // below 1 could push R indefinite.
-    Eigen::Matrix<double, 6, 1> axis_scale = Eigen::Matrix<double, 6, 1>::Ones();
-
-    for (int i = 0; i < 6; i++) {
-
-        if (_opts.do_gait_model && _axes[i].periodic) {
-            // STRUCTURED MOTION: gait oscillation is real. Do NOT apply the
-            // correntropy penalty on this axis. Absorb the oscillation power
-            // into the expected variance so chi2 and the gain remain
-            // consistent, instead of the filter fighting the gait.
-            R(i, i) += _axes[i].osc_var;   // additive on the diagonal is PSD-safe
-            _axes[i].corr_gain = 1.0;
-
-        } else if (window_full) {
-            // NOISE PATH: per-axis correntropy weight applied via R scaling,
-            // same mechanism as the adaptive branch's correntropy gain (R *= 1/G^2).
-            double s = std::max(_opts.corr_sigma(i), 1e-6);
-            double g = std::exp(-(n_innov(i) * n_innov(i)) / (2.0 * s * s));
-            g = std::max(g, 1e-3);
-            axis_scale(i) *= 1.0 / (g * g);
-            _axes[i].corr_gain = g;
+    // ---- 2) absorb the structured component ----
+    // Additive on the diagonal, which is PSD-safe, and it says the right thing:
+    // the model expects motion of this magnitude on this axis, so a residual of
+    // that size is consistent rather than anomalous.
+    std::vector<bool> explained(m, false);
+    for (int k = 0; k < m; k++) {
+        const int a = _axes_idx[k];
+        if (_axis[a].periodic) {
+            R(k, k) += _axis[a].osc_var;
+            explained[k] = true;
         }
     }
 
-    // ---- 3) per-axis sliding-window R scale (adaptive-branch estimate_R) ----
-    if (window_full) {
-        const int n_buf = (int)_innov_window.size();
-        const int start = std::max(0, n_buf - _opts.corr_recent);
-        Eigen::Matrix<double, 6, 1> sum_sq = Eigen::Matrix<double, 6, 1>::Zero();
-        int count = 0;
-        for (int k = start; k < n_buf; k++) {
-            sum_sq += _innov_window[k].cwiseProduct(_innov_window[k]);
-            count++;
-        }
-        if (count > 0) {
-            for (int i = 0; i < 6; i++) {
-                // Gait axes already model their variance explicitly; scaling
-                // them again would double-count the oscillation.
-                if (_opts.do_gait_model && _axes[i].periodic) {
-                    _axes[i].r_scale = 1.0;
-                    continue;
-                }
-                double mean_sq = sum_sq(i) / count;
-                double scale = std::min(std::max(mean_sq, _opts.r_scale_min),
-                                        _opts.r_scale_max);
-                axis_scale(i) *= scale;
-                _axes[i].r_scale = scale;
-            }
-        }
+    // ---- 3) correntropy weighting + innovation-based noise estimate ----
+    // Gait absorption above is already folded into R, so S below carries it too
+    // and a modelled oscillation does not read as an inconsistency.
+    _corr.apply(R, res, HPHt, explained);
+
+    for (int k = 0; k < m; k++) {
+        const int a = _axes_idx[k];
+        _axis[a].gain = _corr.channel(k).gain;
+        _axis[a].r_scale = _corr.channel(k).r_scale;
     }
 
-    // ---- 4) apply the accumulated per-axis factors as a congruence ----
-    // R <- D R D with D = diag(sqrt(scale)), i.e. R_ij *= sqrt(s_i * s_j).
-    // This scales the cross-terms consistently and provably keeps R positive
-    // definite for any positive scale, unlike scaling the diagonal alone.
-    if (!axis_scale.isOnes()) {
-        const Eigen::Matrix<double, 6, 1> d = axis_scale.cwiseSqrt();
-        R = R.cwiseProduct(d * d.transpose());
-    }
-
-    // ---- 5) numerical guard ----
-    // StateHelper::EKFUpdate kills the process when the state covariance comes
-    // back non-PSD, so never hand it an R that is not positive definite.
-    R = 0.5 * (R + R.transpose());
-    Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> es(R);
-    if (es.info() == Eigen::Success) {
-        Eigen::Matrix<double, 6, 1> ev = es.eigenvalues();
-        const double ev_floor = 1e-9 * std::max(1.0, ev.maxCoeff());
-        if (ev.minCoeff() < ev_floor) {
-            ev = ev.cwiseMax(ev_floor);
-            R = es.eigenvectors() * ev.asDiagonal() * es.eigenvectors().transpose();
-        }
-    }
-
-    // ---- 6) advance the normalized-innovation window ----
-    _innov_window.push_back(n_innov);
-    while ((int)_innov_window.size() > _opts.corr_window) {
-        _innov_window.pop_front();
-    }
-
-    PRINT_DEBUG("[PLATFORM] adapt_R | active=%d gaitZ=%d fZ=%.2fHz gains=[%.2f %.2f %.2f | %.2f %.2f %.2f]\n",
-                (int)window_full, (int)_axes[5].periodic, _axes[5].freq_hz,
-                _axes[0].corr_gain, _axes[1].corr_gain, _axes[2].corr_gain,
-                _axes[3].corr_gain, _axes[4].corr_gain, _axes[5].corr_gain);
+    PRINT_DEBUG("[PLATFORM] adapt_R | active=%d gait=[%d %d %d] f=[%.2f %.2f %.2f]Hz "
+                "G=[%.2f %.2f %.2f] rs=[%.2f %.2f %.2f]\n",
+                (int)_corr.active(),
+                (int)_axis[0].periodic, (int)_axis[1].periodic, (int)_axis[2].periodic,
+                _axis[0].freq_hz, _axis[1].freq_hz, _axis[2].freq_hz,
+                _axis[0].gain, _axis[1].gain, _axis[2].gain,
+                _axis[0].r_scale, _axis[1].r_scale, _axis[2].r_scale);
 }

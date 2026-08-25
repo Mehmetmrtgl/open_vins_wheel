@@ -12,16 +12,19 @@
 #include "types/Type.h"
 #include "utils/sensor_data.h"
 
-#include "OptionsPlatform.h"
-#include "PlatformMotionModel.h"
-
 namespace ov_msckf {
 
 
 /**
  * @brief Wheel odometry updater for OpenVINS
- * * This class integrates wheel odometry measurements to update the IMU state.
+ *
+ * This class integrates wheel odometry measurements to update the IMU state.
  * It uses preintegration between two clone times and performs EKF update.
+ *
+ * Self-contained: it owns its own noise model and knows nothing about the
+ * platform motion model. The two are separate integrations of separate
+ * information — an odometry stream, and the vehicle's kinematics — and either
+ * runs with or without the other.
  */
 class UpdaterWheel {
 public:
@@ -60,12 +63,21 @@ public:
      * @param gyro_noise Gyroscope noise (rad/s)
      * @param vel_noise Velocity noise (m/s)
      */
-    void set_noise(double gyro_noise, double vel_noise, double pos_noise) {
-        noise_gyro = gyro_noise;
-        noise_vel  = vel_noise;
-        noise_pos  = pos_noise;
-        PRINT_INFO("[WHEEL] Noise SET: w=%.4f (ang.z)  v=%.4f (lin.x)  p=%.4f (near-zero axes)\n",
-                   noise_gyro, noise_vel, noise_pos);
+    /**
+     * @brief Set the per-axis body-frame measurement noise for the odometry
+     *        channel. This is where the vehicle's kinematics enter the wheel
+     *        update: the axes the odometry reports as zero carry the
+     *        constraint, so their sigma says how far the true body velocity may
+     *        depart from it, not how noisy a dead channel is.
+     * @param w_axis Angular sigmas [x, y, z] (rad/s)
+     * @param v_axis Linear sigmas  [x, y, z] (m/s)
+     */
+    void set_noise_axis(const Eigen::Vector3d &w_axis, const Eigen::Vector3d &v_axis) {
+        noise_w_axis = w_axis;
+        noise_v_axis = v_axis;
+        PRINT_INFO("[WHEEL] Noise SET: w=[%.4f %.4f %.4f]  v=[%.4f %.4f %.4f]\n",
+                   noise_w_axis(0), noise_w_axis(1), noise_w_axis(2),
+                   noise_v_axis(0), noise_v_axis(1), noise_v_axis(2));
     }
 
     void set_chi2_mult(double mult) { chi2_mult = mult; }
@@ -77,15 +89,7 @@ public:
                    enable ? "ON" : "OFF", threshold);
     }
 
-    /// Attach the platform motion model (call from VioManager after construction).
-    /// nullptr keeps the legacy path: isotropic-per-role Q from noise_gyro /
-    /// noise_vel / noise_pos and a fixed R at the EKF update.
-    void set_platform(std::shared_ptr<PlatformMotionModel> model) { platform = model; }
-
 private:
-    /// Platform motion model; nullptr = legacy behaviour
-    std::shared_ptr<PlatformMotionModel> platform;
-
     /**
      * @brief Update state between two clone times
      * @param time0 Start time
@@ -216,10 +220,9 @@ private:
     /// Extrinsic calibration (IMU to Odometry)
     Eigen::Matrix4d T_imu_odom = Eigen::Matrix4d::Identity();
 
-    /// Noise parameters (ackermann-specific)
-    double noise_gyro = 0.2;  ///< angular.z (yaw rate from wheels)
-    double noise_vel  = 0.5;  ///< linear.x  (forward velocity from encoder)
-    double noise_pos  = 0.1;  ///< near-zero axes: angular.x/y, linear.y/z
+    /// Per-axis body-frame measurement noise for the odometry channel
+    Eigen::Vector3d noise_w_axis = Eigen::Vector3d(0.1, 0.1, 0.2);  ///< angular x, y, z
+    Eigen::Vector3d noise_v_axis = Eigen::Vector3d(0.5, 0.1, 0.1);  ///< linear x, y, z
 
     /// Chi2 multiplier for outlier rejection (same as MINS/UpdaterMSCKF)
     double chi2_mult = 15.0;

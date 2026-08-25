@@ -4,89 +4,93 @@ platform:
 
   # Morphology: "car" | "differential" | "legged" | "omni"
   # Selecting a type applies sensible defaults; any key below overrides them.
+  #
+  # This block describes the VEHICLE, not any sensor on it. It carries no wheel
+  # odometry parameters and reads no wheel config: the platform update runs the
+  # same way whether or not an odometry stream exists (see wheel_config.yaml for
+  # the odometry channel's own noise model).
   type: "car"
 
-  # ---- Nonholonomic constraint (car / differential) ----
-  # Default OFF: with wheel odometry present the nonholonomic fact already
-  # flows through the wheel preintegration via the tightened noise_v_axis
-  # below, counted once per clone interval with a correct temporal model.
-  # The explicit pseudo-measurement remains available for control runs and
-  # for the no-wheel configuration.
-  do_constraint_update: false
-  # std-dev of the v=0 pseudo-measurement per body axis [x, y, z] (m/s).
-  # Small = hard constraint. x is free for a car so its value is ignored
-  # by the mask below.
-  constraint_sigma: [1.0e6, 0.06, 0.06]
-  # Lateral only. The vertical axis is NOT constrained even though a car's
-  # v_z is nominally zero: suspension travel, pitch under braking/acceleration
-  # and road grade transitions violate it continuously, and asserting it at
-  # sigma = 0.06 m/s drags the filter. Dropping z from the mask, with nothing
-  # else changed, moved urban39 APE from 37.30 m to 10.94 m.
-  constraint_mask: [0, 1, 0]
+  # ---- What the morphology asserts ----
+  # meas_mask picks the body axes where the model states "velocity here is zero"
+  # and meas_sigma says how far reality may depart from that. Order: [x, y, z].
+  #
+  # Lateral only. A car's v_z is nominally zero too, but suspension travel, pitch
+  # under braking and grade transitions violate it continuously: asserting z at
+  # the same tightness moved urban39 APE from 10.94 m to 37.30 m.
+  # y is 0.06, close to the 0.040 m/s the residual scatters at. Loosening it to
+  # 0.15 was tried and made things worse (12.742 -> 13.024 m APE): the
+  # correntropy kernel works on NORMALIZED innovation, so a loose meas_sigma
+  # makes every residual look consistent and silently disables the
+  # down-weighting (max R inflation 526x -> 2.8x, chi2 never reached its gate).
+  # meas_sigma and corr_kernel_sigma are one setting in two parts.
+  meas_mask: [0, 1, 0]
+  meas_sigma: [1.0e6, 0.06, 1.0e6]
 
-  # Adaptive weighting for the constraint. The residual is sharply peaked at
-  # zero and violated in bursts (turns, bumps, camber), so constraint_sigma is
-  # set for the bulk and the correntropy weight softens the bursts.
-  # 1 Hz: bound how often the standing constraint is re-counted
-  constraint_min_dt: 0.2
-  do_constraint_adaptive: false
-  do_jacobian_check: false
-  constraint_corr_sigma: 1.5
-  constraint_corr_gain_min: 1.0e-3
+  # ---- Slowly varying offset ----
+  # What the sensors report on a pinned axis is zero PLUS a drift the model does
+  # not resolve: mount calibration residue, road camber, suspension trim, a
+  # platform origin that is not quite the true zero-lateral-velocity point.
+  # Measured on urban39, 22.4% of 30 s windows of the lateral residual fall
+  # outside the white-noise band, so the structure is in the mean, not the
+  # scatter. Asserting a hard zero injects that drift a few thousand times per
+  # run; integrated, a persistent 0.01 m/s is ~19 m of cross-track. The offset is
+  # estimated and removed, so the assertion becomes "this axis does not depart
+  # from its own slow trend".
+  bias_tau: 15.0      # s; bracketed on urban39: 30s->10.298, 15s->8.854, 8s->9.414 m APE
+  bias_sigma: 0.02    # m/s; added in quadrature to meas_sigma
 
-  # ---- Per-axis odometry measurement noise (replaces scalar noise_v/noise_w) ----
-  # This is where car morphology enters. The odometry stream reports
-  # v = [v_x, 0, 0]; the zeros on y and z ARE the nonholonomic constraint, so
-  # those axes are TIGHTENED below the legacy isotropic 0.5, and the sigma
-  # states how far true body velocity may depart from zero (tyre slip on y,
-  # suspension motion on z). Inflating them, as the previous shipped config
-  # effectively did through base_noise, removes the constraint information
-  # from the wheel channel (measured on urban39: 8.915 m -> 12.951 m APE).
-  noise_v_axis: [0.50, 0.15, 0.25]
-  noise_w_axis: [0.05, 0.05, 0.05]
+  # Minimum spacing between platform updates (s). The morphology is one standing
+  # fact whose residual error is strongly autocorrelated (calibration residue,
+  # camber, suspension, slip), so applying it at frame rate would count the same
+  # evidence N times and drive the covariance below the truth.
+  update_min_dt: 0.2
 
-  # Adaptive machinery (correntropy, sliding-window R scale, gait) on the
-  # 6-dof wheel residual. OFF so the wheel update is exactly the legacy path
-  # except for the per-axis Q above; the adapt_R-only ablation measured
-  # 8.915 m -> 10.786 m, so leaving it on would contaminate the shaping result.
-  do_wheel_adaptive: false
+  # Multiplier on the 95% chi2 gate. The gate is only a backstop here: the
+  # correntropy weighting below already softens a violation, so the gate exists
+  # for what it cannot absorb (hard skid, sensor fault).
+  chi2_mult: 1.0
 
-  # If non-empty, UpdaterPlatform appends one CSV row per constraint
-  # evaluation (accepted and rejected) for ov_msckf/scripts/
-  # residual_diagnostics.py. Only active when do_constraint_update is true.
-  constraint_log_path: "/home/mehmet/evo-data/logs/run3_constraint.csv"
+  # ---- Correntropy weighting + innovation-based noise estimation ----
+  # The estimator itself, not a mode of it: the residual is sharply peaked at
+  # zero on smooth straight driving and violated in bursts, so one fixed sigma
+  # cannot describe both. meas_sigma is set for the bulk and the kernel widens
+  # the covariance on the bursts. A large corr_kernel_sigma is what "plain
+  # Kalman" would mean here.
+  corr_kernel_sigma: 1.5     # kernel bandwidth, in normalized-innovation units
+  corr_gain_min: 1.0e-3      # floor on G, i.e. cap on the R inflation
+  corr_window: 75            # samples before the noise estimate activates
+  corr_recent: 5             # most recent samples used for it
+  r_scale_min: 1.0           # widening only; see CorrentropyFilter.h for the urban39 sensitivity
+  r_scale_max: 5.0
 
-  # ---- Gait model (legged) ----
-  # For type: "legged" set do_gait_model: true and leave noise_v_axis
-  # roughly isotropic; the oscillation is handled by periodicity detection,
-  # NOT by inflating noise.
-  do_gait_model: false
+  # ---- Gait / periodicity ----
+  # Always evaluated; on a car no periodicity exists in this band and the test
+  # never fires. It is what keeps a legged platform's oscillation from being
+  # mistaken for noise.
   gait_freq_min: 0.5          # Hz, plausible gait band
   gait_freq_max: 5.0
   gait_periodicity_thresh: 0.55
   gait_window: 128            # samples in the periodicity ring buffer
 
-  # ---- Per-axis adaptive (correntropy) parameters, adaptive-branch style ----
-  corr_sigma: [1.5, 1.5, 1.5, 1.5, 1.5, 1.5]   # [rot xyz | pos xyz]
-  corr_window: 75
-  corr_recent: 5
-  r_scale_min: 0.5
-  r_scale_max: 5.0
+  # ---- Diagnostics ----
+  # If non-empty, one CSV row per evaluation (accepted and rejected) for
+  # ov_msckf/scripts/residual_diagnostics.py.
+  log_path: "/home/mehmet/evo-data/logs/platform_residual.csv"
+  do_jacobian_check: false
 
-  # Platform (body) frame the constraints are expressed in. Must be given
-  # explicitly: with wheel_odometry disabled there is no wheel config to fall
-  # back to, and an identity default would silently drop the lever arm.
-  # Same convention as T_imu_wheel: T = [R_OtoI | p_OinI], i.e. the platform
-  # origin expressed in the IMU frame.
+  # Platform (body) frame the kinematics are expressed in. REQUIRED: it is not
+  # inherited from T_imu_wheel, so it means the same thing with or without wheel
+  # odometry configured. Convention T = [R_OtoI | p_OinI], i.e. the platform
+  # origin expressed in the IMU frame — the same reading as T_imu_wheel.
   #
   # z is 0.0 here, NOT the -1.7 that matches T_imu_wheel. The lever arm was
   # measured on urban39 and is NOT what drives the result: z=-1.7 gave 39.18 m
   # APE and z=0.0 gave 37.30 m, a difference well inside the ~6 m run-to-run
   # spread of this bag. It is left at 0.0 only because nothing justifies the
-  # 1.7 m moment arm on the constraint until the platform frame's true height
-  # is established. The analytic Jacobian was validated against numerical
-  # differentiation through IMU::update() (relative error 5e-7), so the
-  # extrinsics convention itself is not in question.
+  # 1.7 m moment arm until the platform frame's true height is established. The
+  # analytic Jacobian was validated against numerical differentiation through
+  # IMU::update() (relative error 5e-7), so the convention is not in question.
   T_imu_platform:
     - [1.0, 0.0, 0.0, 0.07]
     - [0.0, 1.0, 0.0, 0.0]
